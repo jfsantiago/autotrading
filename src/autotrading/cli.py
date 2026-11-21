@@ -9,10 +9,20 @@ from pathlib import Path
 from autotrading.config import AppConfig, load_config
 from autotrading.data.cache import get_cached_ohlcv
 from autotrading.data.exchange import fetch_ohlcv_range, make_public_client
-from autotrading.decision.engine import decide
+from autotrading.decision.engine import OrderAction, decide, decide_trade_action
 from autotrading.decision.market import get_latest_signal
 from autotrading.decision.report import print_decisions, save_decisions
 from autotrading.engine.backtester import run_backtest
+from autotrading.execution.client import assert_leverage_safe, make_futures_testnet_client
+from autotrading.execution.orders import calculate_position_size, close_position, open_long, open_short
+from autotrading.execution.positions import get_position_state
+from autotrading.execution.report import (
+    print_confirm_footer,
+    print_no_action,
+    print_order_executed,
+    print_trade_preview,
+    save_trade_results,
+)
 from autotrading.news.pipeline import build_news_snapshot
 from autotrading.news.report import print_news_summary, save_news_results
 from autotrading.reporting.report import report
@@ -42,6 +52,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     decide_parser.add_argument("--config", required=True, help="Path to a YAML config file")
     decide_parser.add_argument("--output", help="Override results output dir for this run")
+
+    trade_parser = subparsers.add_parser(
+        "trade",
+        help="Position-aware Binance Futures TESTNET execution: preview, or place orders with --confirm",
+    )
+    trade_parser.add_argument("--config", required=True, help="Path to a YAML config file")
+    trade_parser.add_argument(
+        "--confirm", action="store_true", help="Actually place orders on the Futures TESTNET"
+    )
+    trade_parser.add_argument("--symbol", help="Restrict to a single symbol (spot notation)")
+    trade_parser.add_argument("--output", help="Override results output dir for this run")
 
     return parser
 
@@ -171,6 +192,104 @@ def run_decide_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_trade_command(args: argparse.Namespace) -> int:
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+
+    loaded = _load_news_prerequisites(args)
+    if isinstance(loaded, int):
+        return loaded
+    config, secrets = loaded
+
+    try:
+        assert_leverage_safe(config.futures.leverage)
+        futures_client = make_futures_testnet_client(secrets)
+    except (ValueError, RuntimeError) as exc:
+        print(f"Error: {exc}")
+        return 1
+
+    spot_client = make_public_client()
+    snapshot = build_news_snapshot(config, secrets)
+
+    symbols = [args.symbol] if args.symbol else config.all_symbols
+
+    decisions = []
+    candles_by_symbol = {}
+    positions_by_symbol = {}
+
+    for symbol in symbols:
+        strategy_name = config.strategy_for_symbol(symbol)
+        params = config.strategy_params[strategy_name]
+        technical_signal, df = get_latest_signal(
+            spot_client,
+            symbol,
+            config.timeframe,
+            strategy_name,
+            params,
+            config.decision.live_lookback_candles,
+        )
+        candles_by_symbol[symbol] = df
+
+        position = get_position_state(futures_client, symbol, config.futures.quote_currency)
+        positions_by_symbol[symbol] = position
+
+        news_sentiment = snapshot.symbol_sentiments.get(symbol)
+        decisions.append(
+            decide_trade_action(
+                symbol, technical_signal, position, news_sentiment, config.decision.news_veto_threshold
+            )
+        )
+
+    print_trade_preview(decisions, snapshot.symbol_sentiments)
+
+    executed_results = {}
+    if args.confirm:
+        balance = futures_client.fetch_balance()
+        equity = float(balance.get(config.futures.quote_currency, {}).get("total") or 0.0)
+
+        for decision in decisions:
+            if decision.order_action == OrderAction.NONE:
+                print_no_action(decision)
+                continue
+
+            try:
+                if decision.order_action == OrderAction.OPEN_LONG:
+                    entry_price = candles_by_symbol[decision.symbol]["close"].iloc[-1]
+                    quantity = calculate_position_size(
+                        equity, entry_price, config.futures.leverage, config.risk
+                    )
+                    result = open_long(
+                        futures_client, decision.symbol, quantity, config.futures.leverage,
+                        config.risk.stop_loss_pct, config.futures.quote_currency,
+                    )
+                elif decision.order_action == OrderAction.OPEN_SHORT:
+                    entry_price = candles_by_symbol[decision.symbol]["close"].iloc[-1]
+                    quantity = calculate_position_size(
+                        equity, entry_price, config.futures.leverage, config.risk
+                    )
+                    result = open_short(
+                        futures_client, decision.symbol, quantity, config.futures.leverage,
+                        config.risk.stop_loss_pct, config.futures.quote_currency,
+                    )
+                else:  # CLOSE_LONG or CLOSE_SHORT
+                    result = close_position(
+                        futures_client, decision.symbol, positions_by_symbol[decision.symbol],
+                        config.futures.quote_currency,
+                    )
+            except Exception as exc:
+                print(f"ORDER FAILED — {decision.symbol}: {exc}")
+                continue
+
+            executed_results[decision.symbol] = result
+            print_order_executed(decision, result)
+
+        print_confirm_footer()
+
+    output_dir = Path(args.output or "results/trade")
+    save_trade_results(decisions, executed_results, output_dir)
+
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_arg_parser()
     args = parser.parse_args(argv)
@@ -181,6 +300,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_news_command(args)
     if args.command == "decide":
         return run_decide_command(args)
+    if args.command == "trade":
+        return run_trade_command(args)
 
     parser.print_help()
     return 1

@@ -11,6 +11,8 @@ class Secrets:
     openai_api_key: str
     newsdata_api_key: str | None
     coinmarketcal_api_key: str | None
+    binance_testnet_api_key: str | None = None
+    binance_testnet_api_secret: str | None = None
 
 
 def load_secrets() -> Secrets:
@@ -32,4 +34,6 @@ def load_secrets() -> Secrets:
         openai_api_key=openai_api_key,
         newsdata_api_key=os.environ.get("NEWSDATA_API_KEY") or None,
         coinmarketcal_api_key=os.environ.get("COINMARKETCAL_API_KEY") or None,
+        binance_testnet_api_key=os.environ.get("BINANCE_TESTNET_API_KEY") or None,
+        binance_testnet_api_secret=os.environ.get("BINANCE_TESTNET_API_SECRET") or None,
     )

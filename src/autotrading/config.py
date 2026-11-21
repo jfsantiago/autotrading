@@ -59,6 +59,22 @@ class DecisionConfig:
     live_lookback_candles: int
 
 
+DEFAULT_FUTURES_LEVERAGE = 4
+DEFAULT_FUTURES_QUOTE_CURRENCY = "USDT"
+
+
+@dataclass
+class FuturesConfig:
+    """Futures trading tuning for `autotrading trade`. Always present with
+    safe defaults, like `decision`. Margin mode is deliberately NOT here —
+    it's hardcoded to isolated in execution/orders.py as a safety invariant,
+    not something a config edit should be able to change.
+    """
+
+    leverage: int
+    quote_currency: str
+
+
 @dataclass
 class AppConfig:
     exchange: str
@@ -71,6 +87,7 @@ class AppConfig:
     risk: RiskParameters
     output: OutputConfig
     decision: DecisionConfig
+    futures: FuturesConfig
     news: NewsConfig | None = None
 
     @property
@@ -93,6 +110,7 @@ def load_config(path: str | Path) -> AppConfig:
     output = raw["output"]
     date_range = raw["date_range"]
     decision_raw = raw.get("decision") or {}
+    futures_raw = raw.get("futures") or {}
 
     return AppConfig(
         exchange=raw["exchange"],
@@ -123,6 +141,10 @@ def load_config(path: str | Path) -> AppConfig:
             live_lookback_candles=int(
                 decision_raw.get("live_lookback_candles", DEFAULT_LIVE_LOOKBACK_CANDLES)
             ),
+        ),
+        futures=FuturesConfig(
+            leverage=int(futures_raw.get("leverage", DEFAULT_FUTURES_LEVERAGE)),
+            quote_currency=futures_raw.get("quote_currency", DEFAULT_FUTURES_QUOTE_CURRENCY),
         ),
         news=load_news_config(raw.get("news")),
     )

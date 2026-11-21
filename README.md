@@ -18,12 +18,16 @@ pip install -r requirements-dev.txt -e .
 autotrading backtest --config configs/default.yaml --start 2024-01-01 --end 2024-04-01 --output results/run1
 autotrading news --config configs/default.yaml
 autotrading decide --config configs/default.yaml
+autotrading trade --config configs/default.yaml              # preview, no coloca órdenes
+autotrading trade --config configs/default.yaml --confirm     # coloca órdenes reales en el TESTNET
 pytest tests/ -v
 ```
 
-`decide` es un **dry-run**: combina la señal técnica más reciente con el sentimiento de noticias actual y dice qué haría el bot ahora mismo — no coloca ninguna orden.
+`decide` es un **dry-run** sin estado: combina la señal técnica más reciente con el sentimiento de noticias actual y dice qué haría el bot ahora mismo — no coloca ninguna orden ni consulta posiciones.
 
-El comando `news` requiere secrets en un archivo `.env` (copiar desde `.env.example`). Solo `OPENAI_API_KEY` es obligatoria; `NEWSDATA_API_KEY` y `COINMARKETCAL_API_KEY` son opcionales — si faltan, esas fuentes se desactivan solas sin romper la corrida.
+`trade` sí es consciente de la posición real (consulta el exchange) y, con `--confirm`, coloca órdenes de verdad contra el **Binance Futures Testnet** (dinero ficticio). Sin `--confirm` solo muestra el preview, igual que `decide` pero con la posición real incluida.
+
+El comando `news`/`decide` requieren secrets en un archivo `.env` (copiar desde `.env.example`). Solo `OPENAI_API_KEY` es obligatoria; `NEWSDATA_API_KEY` y `COINMARKETCAL_API_KEY` son opcionales. `trade` además requiere `BINANCE_TESTNET_API_KEY` / `BINANCE_TESTNET_API_SECRET` (del Futures Testnet, testnet.binancefuture.com — no es tu cuenta real de Binance).
 
 ## Estado
 
@@ -33,4 +37,6 @@ El comando `news` requiere secrets en un archivo `.env` (copiar desde `.env.exam
 
 **Fase 3 completa**: motor de decisión en vivo (`autotrading decide`). Combina la señal técnica de la vela más reciente (últimas 300 velas cerradas, sin cache en disco) con el sentimiento de noticias actual, vía un **filtro de veto**: la señal técnica manda, las noticias solo pueden bloquear un BUY cuando el sentimiento es muy negativo (umbral configurable, default -0.5); nunca generan un BUY por sí solas ni bloquean SELL/HOLD. Solo funciona en vivo (no hay backtest histórico de noticias posible, RSS no tiene archivo histórico) — es un dry-run, no coloca órdenes.
 
-**Pendiente** (siguientes fases): ejecución en vivo real en Binance (con capital mínimo, solo tras observar `decide` funcionando por un tiempo), despliegue 24/7, bot de Telegram como panel de administración.
+**Fase 4 completa**: ejecución en Binance USD-M Futures TESTNET (`autotrading trade`). Cambio de spot a futuros para poder ir short (apostar a la baja), apalancamiento configurable (default 4x, techo duro de 10x en código), margen siempre aislado (hardcoded, nunca cross) y stop-loss real colocado en el exchange (no solo en memoria) inmediatamente después de abrir cualquier posición — así una posición queda protegida aunque el proceso se caiga. La señal técnica sigue viniendo de datos spot (sin cambios); solo posiciones y órdenes pasan por el cliente de futuros. El veto de noticias ahora es simétrico: bajista bloquea abrir long, alcista bloquea abrir short. Sigue siendo **testnet** (dinero ficticio) — nada de esto toca dinero real todavía.
+
+**Pendiente** (siguientes fases): validar `trade --confirm` con keys reales de testnet, luego ejecución con capital real mínimo (solo tras observar el testnet funcionando correctamente), despliegue 24/7, bot de Telegram como panel de administración.

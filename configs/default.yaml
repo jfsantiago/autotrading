@@ -41,6 +41,10 @@ decision:
   news_veto_threshold: -0.5
   live_lookback_candles: 300
 
+futures:
+  leverage: 4
+  quote_currency: "USDT"
+
 news:
   rss:
     feeds:
