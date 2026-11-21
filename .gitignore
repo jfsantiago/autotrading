@@ -6,6 +6,8 @@ venv/
 .env.*
 *.log
 .DS_Store
-data/
+/data/
 logs/
+results/
+*.egg-info/
 .pytest_cache/

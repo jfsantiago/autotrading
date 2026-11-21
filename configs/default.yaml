@@ -1,0 +1,38 @@
+exchange: binance
+timeframe: "1h"
+date_range:
+  start: "2024-01-01"
+  end: "2024-06-01"
+initial_capital: 10000
+
+universe:
+  stable:
+    symbols: ["BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT"]
+    strategy: stable_trend
+  volatile:
+    symbols: ["PEPE/USDT", "WIF/USDT", "INJ/USDT"]
+    strategy: volatile_breakout
+
+strategy_params:
+  stable_trend:
+    fast_ma: 20
+    slow_ma: 50
+    rsi_period: 14
+    rsi_buy_max: 70
+    rsi_sell_min: 30
+  volatile_breakout:
+    pct_change_window: 5
+    pct_change_threshold: 0.05
+    volume_window: 20
+    volume_spike_zscore: 2.0
+
+risk:
+  position_size_pct: 0.04
+  stop_loss_pct: 0.03
+  take_profit_pct: 0.06
+  max_concurrent_positions: 5
+  fee_pct: 0.001
+
+output:
+  dir: "results"
+  save_csv: true
