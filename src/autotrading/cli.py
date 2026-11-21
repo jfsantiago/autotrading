@@ -9,17 +9,12 @@ from pathlib import Path
 from autotrading.config import AppConfig, load_config
 from autotrading.data.cache import get_cached_ohlcv
 from autotrading.data.exchange import fetch_ohlcv_range, make_public_client
+from autotrading.decision.engine import decide
+from autotrading.decision.market import get_latest_signal
+from autotrading.decision.report import print_decisions, save_decisions
 from autotrading.engine.backtester import run_backtest
-from autotrading.news.aggregate import aggregate_by_symbol
-from autotrading.news.events import merge_events
-from autotrading.news.llm_sentiment import classify_headlines_batch
-from autotrading.news.macro_calendar import load_macro_events
-from autotrading.news.models import ScoredItem
+from autotrading.news.pipeline import build_news_snapshot
 from autotrading.news.report import print_news_summary, save_news_results
-from autotrading.news.scoring import label_to_score
-from autotrading.news.sources.coinmarketcal import fetch_crypto_events
-from autotrading.news.sources.newsdata import fetch_newsdata_items
-from autotrading.news.sources.rss import fetch_rss_items
 from autotrading.reporting.report import report
 from autotrading.secrets import load_secrets
 from autotrading.strategies import STRATEGY_REGISTRY
@@ -41,6 +36,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
     news_parser = subparsers.add_parser("news", help="Fetch and score news/events")
     news_parser.add_argument("--config", required=True, help="Path to a YAML config file")
     news_parser.add_argument("--output", help="Override news.output.dir")
+
+    decide_parser = subparsers.add_parser(
+        "decide", help="Dry-run: show what the bot would do right now (no orders placed)"
+    )
+    decide_parser.add_argument("--config", required=True, help="Path to a YAML config file")
+    decide_parser.add_argument("--output", help="Override results output dir for this run")
 
     return parser
 
@@ -94,11 +95,11 @@ def run_backtest_command(args: argparse.Namespace) -> int:
     return 0
 
 
-def run_news_command(args: argparse.Namespace) -> int:
-    import openai
+def _load_news_prerequisites(args: argparse.Namespace) -> tuple[AppConfig, object] | int:
+    """Shared config/secrets loading + validation for `news` and `decide`.
 
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
-
+    Returns (config, secrets) on success, or an int exit code on failure.
+    """
     config: AppConfig = load_config(args.config)
     if config.news is None:
         print("Error: this config file has no `news:` section configured.")
@@ -110,71 +111,62 @@ def run_news_command(args: argparse.Namespace) -> int:
         print(f"Error: {exc}")
         return 1
 
-    news_cfg = config.news
-    cache_dir = Path(news_cfg.cache.dir)
-    output_dir = Path(args.output or news_cfg.output.dir)
+    return config, secrets
 
-    rss_items = fetch_rss_items(news_cfg.rss.feeds, news_cfg.rss.fetch_limit_per_feed)
 
-    newsdata_items = []
-    if news_cfg.newsdata.enabled:
-        newsdata_items = fetch_newsdata_items(
-            secrets, config.all_symbols, cache_dir, news_cfg.cache.raw_ttl_hours
+def run_news_command(args: argparse.Namespace) -> int:
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+
+    loaded = _load_news_prerequisites(args)
+    if isinstance(loaded, int):
+        return loaded
+    config, secrets = loaded
+
+    output_dir = Path(args.output or config.news.output.dir)
+
+    snapshot = build_news_snapshot(config, secrets)
+
+    print_news_summary(snapshot.symbol_sentiments, snapshot.upcoming_events)
+    if config.news.output.save_csv:
+        save_news_results(
+            snapshot.scored_items, snapshot.symbol_sentiments, snapshot.upcoming_events, output_dir
         )
 
-    crypto_events = []
-    if news_cfg.calendar.crypto_events_enabled:
-        crypto_events = fetch_crypto_events(
-            secrets,
-            config.all_symbols,
-            news_cfg.calendar.lookahead_days,
-            cache_dir,
-            news_cfg.cache.raw_ttl_hours,
-        )
-    macro_events = load_macro_events(news_cfg.calendar.macro_events_file)
+    return 0
 
-    client = openai.OpenAI(api_key=secrets.openai_api_key)
-    classifications = classify_headlines_batch(
-        client,
-        rss_items,
-        config.all_symbols,
-        cache_dir,
-        news_cfg.sentiment.llm_model,
-        news_cfg.sentiment.llm_batch_size,
-    )
 
-    scored_items: list[ScoredItem] = []
-    for item in rss_items:
-        classification = classifications[item.item_id]
-        scored_items.append(
-            ScoredItem(
-                item=item,
-                label=classification.label,
-                score=label_to_score(classification.label),
-                symbols=classification.relevant_symbols,
-                source_weight=news_cfg.sentiment.llm_source_weight,
-            )
+def run_decide_command(args: argparse.Namespace) -> int:
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+
+    loaded = _load_news_prerequisites(args)
+    if isinstance(loaded, int):
+        return loaded
+    config, secrets = loaded
+
+    snapshot = build_news_snapshot(config, secrets)
+    client = make_public_client()
+
+    decisions = []
+    for symbol in config.all_symbols:
+        strategy_name = config.strategy_for_symbol(symbol)
+        params = config.strategy_params[strategy_name]
+        technical_signal, _ = get_latest_signal(
+            client,
+            symbol,
+            config.timeframe,
+            strategy_name,
+            params,
+            config.decision.live_lookback_candles,
         )
-    for item in newsdata_items:
-        label = item.native_label
-        scored_items.append(
-            ScoredItem(
-                item=item,
-                label=label,
-                score=label_to_score(label),
-                symbols=item.native_symbols or [],
-                source_weight=news_cfg.newsdata.source_weight,
-            )
+        news_sentiment = snapshot.symbol_sentiments.get(symbol)
+        decisions.append(
+            decide(symbol, technical_signal, news_sentiment, config.decision.news_veto_threshold)
         )
 
-    symbol_sentiments = aggregate_by_symbol(scored_items, config.all_symbols)
-    upcoming_events = merge_events(
-        crypto_events, macro_events, news_cfg.calendar.soon_threshold_days
-    )
+    print_decisions(decisions, snapshot.symbol_sentiments)
 
-    print_news_summary(symbol_sentiments, upcoming_events)
-    if news_cfg.output.save_csv:
-        save_news_results(scored_items, symbol_sentiments, upcoming_events, output_dir)
+    output_dir = Path(args.output or "results/decide")
+    save_decisions(decisions, snapshot.symbol_sentiments, output_dir)
 
     return 0
 
@@ -187,6 +179,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_backtest_command(args)
     if args.command == "news":
         return run_news_command(args)
+    if args.command == "decide":
+        return run_decide_command(args)
 
     parser.print_help()
     return 1

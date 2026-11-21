@@ -37,6 +37,10 @@ output:
   dir: "results"
   save_csv: true
 
+decision:
+  news_veto_threshold: -0.5
+  live_lookback_candles: 300
+
 news:
   rss:
     feeds:

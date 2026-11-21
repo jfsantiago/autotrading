@@ -42,6 +42,23 @@ class OutputConfig:
     save_csv: bool
 
 
+DEFAULT_NEWS_VETO_THRESHOLD = -0.5
+DEFAULT_LIVE_LOOKBACK_CANDLES = 300
+
+
+@dataclass
+class DecisionConfig:
+    """Tuning for the live decision engine (`autotrading decide`).
+
+    Always present with safe defaults (unlike `news`, which is opt-in) —
+    there's no scenario where "decision is unconfigured" should mean
+    "skip this feature," since `decide` is the feature being invoked.
+    """
+
+    news_veto_threshold: float
+    live_lookback_candles: int
+
+
 @dataclass
 class AppConfig:
     exchange: str
@@ -53,6 +70,7 @@ class AppConfig:
     strategy_params: dict[str, dict[str, Any]]
     risk: RiskParameters
     output: OutputConfig
+    decision: DecisionConfig
     news: NewsConfig | None = None
 
     @property
@@ -74,6 +92,7 @@ def load_config(path: str | Path) -> AppConfig:
     risk = raw["risk"]
     output = raw["output"]
     date_range = raw["date_range"]
+    decision_raw = raw.get("decision") or {}
 
     return AppConfig(
         exchange=raw["exchange"],
@@ -97,5 +116,13 @@ def load_config(path: str | Path) -> AppConfig:
             fee_pct=float(risk["fee_pct"]),
         ),
         output=OutputConfig(dir=output["dir"], save_csv=bool(output["save_csv"])),
+        decision=DecisionConfig(
+            news_veto_threshold=float(
+                decision_raw.get("news_veto_threshold", DEFAULT_NEWS_VETO_THRESHOLD)
+            ),
+            live_lookback_candles=int(
+                decision_raw.get("live_lookback_candles", DEFAULT_LIVE_LOOKBACK_CANDLES)
+            ),
+        ),
         news=load_news_config(raw.get("news")),
     )
