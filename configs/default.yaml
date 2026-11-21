@@ -48,7 +48,7 @@ news:
     enabled: false
     source_weight: 1.0
   sentiment:
-    llm_model: "claude-haiku-4-5-20251001"
+    llm_model: "gpt-5-mini"
     llm_batch_size: 20
     llm_source_weight: 1.0
   calendar:

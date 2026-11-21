@@ -6,7 +6,7 @@ from autotrading.secrets import Secrets
 
 def make_secrets(cmc_key="key123"):
     return Secrets(
-        anthropic_api_key="anthropic-key", newsdata_api_key=None, coinmarketcal_api_key=cmc_key
+        openai_api_key="openai-key", newsdata_api_key=None, coinmarketcal_api_key=cmc_key
     )
 
 

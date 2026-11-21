@@ -13,7 +13,7 @@ dependencies = [
     "pyyaml",
     "feedparser",
     "requests",
-    "anthropic",
+    "openai",
 ]
 
 [project.scripts]

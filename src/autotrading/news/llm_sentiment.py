@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -9,10 +10,10 @@ from autotrading.news.models import LLMClassification, NewsItem, SentimentLabel
 
 logger = logging.getLogger(__name__)
 
-CLASSIFY_TOOL = {
-    "name": "submit_classifications",
-    "description": "Classify each crypto news headline's likely short-term price impact.",
-    "input_schema": {
+CLASSIFICATIONS_JSON_SCHEMA = {
+    "name": "classifications",
+    "strict": True,
+    "schema": {
         "type": "object",
         "properties": {
             "classifications": {
@@ -22,18 +23,19 @@ CLASSIFY_TOOL = {
                     "properties": {
                         "id": {"type": "string", "description": "The headline's id, copied as given"},
                         "label": {"type": "string", "enum": ["bullish", "bearish", "neutral"]},
-                        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                        "confidence": {"type": "number"},
                         "relevant_symbols": {
                             "type": "array",
                             "items": {"type": "string"},
-                            "description": "Which of the provided symbols this headline is actually about, if any",
                         },
                     },
                     "required": ["id", "label", "confidence", "relevant_symbols"],
+                    "additionalProperties": False,
                 },
             }
         },
         "required": ["classifications"],
+        "additionalProperties": False,
     },
 }
 
@@ -52,21 +54,24 @@ def _build_prompt(batch: list[NewsItem], universe_symbols: list[str]) -> str:
 
 
 def _parse_response(response: Any) -> dict[str, LLMClassification]:
-    for block in response.content:
-        if getattr(block, "type", None) == "tool_use" and block.name == "submit_classifications":
-            results = {}
-            for entry in block.input.get("classifications", []):
-                try:
-                    results[entry["id"]] = LLMClassification(
-                        label=SentimentLabel(entry["label"]),
-                        confidence=float(entry["confidence"]),
-                        relevant_symbols=list(entry.get("relevant_symbols", [])),
-                    )
-                except (KeyError, ValueError):
-                    logger.warning("malformed classification entry: %r", entry)
-            return results
-    logger.warning("no tool_use block found in LLM response")
-    return {}
+    content = response.choices[0].message.content
+    try:
+        payload = json.loads(content)
+    except (json.JSONDecodeError, TypeError):
+        logger.warning("could not parse LLM response as JSON: %r", content)
+        return {}
+
+    results = {}
+    for entry in payload.get("classifications", []):
+        try:
+            results[entry["id"]] = LLMClassification(
+                label=SentimentLabel(entry["label"]),
+                confidence=float(entry["confidence"]),
+                relevant_symbols=list(entry.get("relevant_symbols", [])),
+            )
+        except (KeyError, ValueError):
+            logger.warning("malformed classification entry: %r", entry)
+    return results
 
 
 def classify_headlines_batch(
@@ -78,8 +83,8 @@ def classify_headlines_batch(
     batch_size: int,
 ) -> dict[str, LLMClassification]:
     """Classify items needing LLM sentiment (those without a native_label),
-    using a permanent per-item cache and batched tool-use calls so each
-    headline is only ever classified once.
+    using a permanent per-item cache and batched structured-output calls so
+    each headline is only ever classified once.
     """
     results: dict[str, LLMClassification] = {}
     to_classify: list[NewsItem] = []
@@ -95,12 +100,10 @@ def classify_headlines_batch(
         batch = to_classify[i : i + batch_size]
         prompt = _build_prompt(batch, universe_symbols)
 
-        response = client.messages.create(
+        response = client.chat.completions.create(
             model=model,
-            max_tokens=2048,
-            tools=[CLASSIFY_TOOL],
-            tool_choice={"type": "tool", "name": "submit_classifications"},
             messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_schema", "json_schema": CLASSIFICATIONS_JSON_SCHEMA},
         )
         batch_results = _parse_response(response)
 

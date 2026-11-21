@@ -4,4 +4,4 @@ python-dotenv
 pyyaml
 feedparser
 requests
-anthropic
+openai

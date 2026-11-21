@@ -1,14 +1,70 @@
 # Mantenido a mano. Actualizar cada pocos meses desde el calendario de la Fed
 # (federalreserve.gov/monetarypolicy/fomccalendars.htm) y el calendario de CPI
 # del BLS (bls.gov/schedule/news_release/cpi.htm). No existe una API gratuita
-# confiable para esto.
+# confiable para esto. La Fed publica su calendario de reuniones casi un año
+# completo por adelantado, así que no hace falta tocar este archivo seguido.
+# Fecha de "decision" para FOMC = segundo día de la reunión (cuando se anuncia).
 events:
-  - date: "2026-12-16"
+  - date: "2026-12-09"
     type: fomc
     label: "FOMC meeting decision"
   - date: "2026-12-10"
     type: cpi
     label: "CPI release (November 2026)"
-  - date: "2027-01-28"
+  - date: "2027-01-13"
+    type: cpi
+    label: "CPI release (December 2026)"
+  - date: "2027-01-27"
     type: fomc
     label: "FOMC meeting decision"
+  - date: "2027-02-11"
+    type: cpi
+    label: "CPI release (January 2027)"
+  - date: "2027-03-10"
+    type: cpi
+    label: "CPI release (February 2027)"
+  - date: "2027-03-17"
+    type: fomc
+    label: "FOMC meeting decision"
+  - date: "2027-04-13"
+    type: cpi
+    label: "CPI release (March 2027)"
+  - date: "2027-04-28"
+    type: fomc
+    label: "FOMC meeting decision"
+  - date: "2027-05-12"
+    type: cpi
+    label: "CPI release (April 2027)"
+  - date: "2027-06-09"
+    type: fomc
+    label: "FOMC meeting decision"
+  - date: "2027-06-10"
+    type: cpi
+    label: "CPI release (May 2027)"
+  - date: "2027-07-14"
+    type: cpi
+    label: "CPI release (June 2027)"
+  - date: "2027-07-28"
+    type: fomc
+    label: "FOMC meeting decision"
+  - date: "2027-08-11"
+    type: cpi
+    label: "CPI release (July 2027)"
+  - date: "2027-09-14"
+    type: cpi
+    label: "CPI release (August 2027)"
+  - date: "2027-09-15"
+    type: fomc
+    label: "FOMC meeting decision"
+  - date: "2027-10-14"
+    type: cpi
+    label: "CPI release (September 2027)"
+  - date: "2027-10-27"
+    type: fomc
+    label: "FOMC meeting decision"
+  - date: "2027-11-10"
+    type: cpi
+    label: "CPI release (October 2027)"
+  - date: "2027-12-10"
+    type: cpi
+    label: "CPI release (November 2027)"

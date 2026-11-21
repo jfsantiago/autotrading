@@ -95,7 +95,7 @@ def run_backtest_command(args: argparse.Namespace) -> int:
 
 
 def run_news_command(args: argparse.Namespace) -> int:
-    import anthropic
+    import openai
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
@@ -133,7 +133,7 @@ def run_news_command(args: argparse.Namespace) -> int:
         )
     macro_events = load_macro_events(news_cfg.calendar.macro_events_file)
 
-    client = anthropic.Anthropic(api_key=secrets.anthropic_api_key)
+    client = openai.OpenAI(api_key=secrets.openai_api_key)
     classifications = classify_headlines_batch(
         client,
         rss_items,

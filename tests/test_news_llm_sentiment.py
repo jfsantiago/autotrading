@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -15,13 +16,11 @@ def make_item(item_id):
     )
 
 
-def make_tool_use_response(classifications):
-    block = SimpleNamespace(
-        type="tool_use",
-        name="submit_classifications",
-        input={"classifications": classifications},
-    )
-    return SimpleNamespace(content=[block])
+def make_chat_completion_response(classifications):
+    content = json.dumps({"classifications": classifications})
+    message = SimpleNamespace(content=content)
+    choice = SimpleNamespace(message=message)
+    return SimpleNamespace(choices=[choice])
 
 
 class FakeClient:
@@ -30,7 +29,11 @@ class FakeClient:
         self.call_count = 0
 
     @property
-    def messages(self):
+    def chat(self):
+        return self
+
+    @property
+    def completions(self):
         return self
 
     def create(self, **kwargs):
@@ -41,13 +44,13 @@ class FakeClient:
 def test_classify_batches_calls(tmp_path):
     items = [make_item("a"), make_item("b"), make_item("c")]
     responses = [
-        make_tool_use_response(
+        make_chat_completion_response(
             [
                 {"id": "a", "label": "bullish", "confidence": 0.9, "relevant_symbols": ["BTC"]},
                 {"id": "b", "label": "bearish", "confidence": 0.8, "relevant_symbols": []},
             ]
         ),
-        make_tool_use_response(
+        make_chat_completion_response(
             [{"id": "c", "label": "neutral", "confidence": 0.5, "relevant_symbols": []}]
         ),
     ]
@@ -66,7 +69,7 @@ def test_classify_batches_calls(tmp_path):
 def test_classify_uses_cache_on_second_call(tmp_path):
     items = [make_item("a")]
     responses = [
-        make_tool_use_response(
+        make_chat_completion_response(
             [{"id": "a", "label": "bullish", "confidence": 0.9, "relevant_symbols": ["BTC"]}]
         )
     ]
@@ -82,7 +85,7 @@ def test_classify_uses_cache_on_second_call(tmp_path):
 def test_classify_falls_back_to_neutral_on_missing_id(tmp_path):
     items = [make_item("a"), make_item("b")]
     responses = [
-        make_tool_use_response(
+        make_chat_completion_response(
             [{"id": "a", "label": "bullish", "confidence": 0.9, "relevant_symbols": []}]
         )
     ]
