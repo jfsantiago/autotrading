@@ -6,6 +6,8 @@ from typing import Any
 
 import yaml
 
+from autotrading.news.config import NewsConfig, load_news_config
+
 
 @dataclass
 class RiskParameters:
@@ -51,6 +53,7 @@ class AppConfig:
     strategy_params: dict[str, dict[str, Any]]
     risk: RiskParameters
     output: OutputConfig
+    news: NewsConfig | None = None
 
     @property
     def all_symbols(self) -> list[str]:
@@ -94,4 +97,5 @@ def load_config(path: str | Path) -> AppConfig:
             fee_pct=float(risk["fee_pct"]),
         ),
         output=OutputConfig(dir=output["dir"], save_csv=bool(output["save_csv"])),
+        news=load_news_config(raw.get("news")),
     )

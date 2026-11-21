@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Sample Crypto News</title>
+    <link>http://example.com</link>
+    <description>Test feed</description>
+    <item>
+      <title>Bitcoin rallies past key resistance</title>
+      <link>http://example.com/btc-rally</link>
+      <pubDate>Mon, 01 Jan 2024 12:00:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>Exchange hacked, millions lost</title>
+      <link>http://example.com/hack</link>
+      <pubDate>Tue, 02 Jan 2024 12:00:00 GMT</pubDate>
+    </item>
+  </channel>
+</rss>

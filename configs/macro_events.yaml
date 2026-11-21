@@ -1,0 +1,14 @@
+# Mantenido a mano. Actualizar cada pocos meses desde el calendario de la Fed
+# (federalreserve.gov/monetarypolicy/fomccalendars.htm) y el calendario de CPI
+# del BLS (bls.gov/schedule/news_release/cpi.htm). No existe una API gratuita
+# confiable para esto.
+events:
+  - date: "2026-12-16"
+    type: fomc
+    label: "FOMC meeting decision"
+  - date: "2026-12-10"
+    type: cpi
+    label: "CPI release (November 2026)"
+  - date: "2027-01-28"
+    type: fomc
+    label: "FOMC meeting decision"

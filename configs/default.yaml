@@ -36,3 +36,29 @@ risk:
 output:
   dir: "results"
   save_csv: true
+
+news:
+  rss:
+    feeds:
+      - "https://www.coindesk.com/arc/outboundfeeds/rss/"
+      - "https://cointelegraph.com/rss"
+      - "https://decrypt.co/feed"
+    fetch_limit_per_feed: 20
+  newsdata:
+    enabled: false
+    source_weight: 1.0
+  sentiment:
+    llm_model: "claude-haiku-4-5-20251001"
+    llm_batch_size: 20
+    llm_source_weight: 1.0
+  calendar:
+    crypto_events_enabled: true
+    lookahead_days: 14
+    macro_events_file: "configs/macro_events.yaml"
+    soon_threshold_days: 3
+  cache:
+    dir: "data/news_cache"
+    raw_ttl_hours: 6
+  output:
+    dir: "results/news"
+    save_csv: true

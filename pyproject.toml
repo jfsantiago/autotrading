@@ -11,6 +11,9 @@ dependencies = [
     "pandas",
     "python-dotenv",
     "pyyaml",
+    "feedparser",
+    "requests",
+    "anthropic",
 ]
 
 [project.scripts]
