@@ -16,6 +16,17 @@ def test_to_futures_symbol_rejects_wrong_quote():
         to_futures_symbol("BTC/BUSD")
 
 
+def test_to_futures_symbol_applies_1000x_override():
+    # Binance has no "PEPE/USDT:USDT" futures market, only "1000PEPE/USDT:USDT"
+    # - confirmed live against the real exchange.
+    assert to_futures_symbol("PEPE/USDT") == "1000PEPE/USDT:USDT"
+
+
+def test_to_futures_symbol_leaves_unaffected_symbols_alone():
+    assert to_futures_symbol("WIF/USDT") == "WIF/USDT:USDT"
+    assert to_futures_symbol("INJ/USDT") == "INJ/USDT:USDT"
+
+
 @pytest.mark.parametrize("leverage", [1, 4, MAX_LEVERAGE_CEILING])
 def test_assert_leverage_safe_accepts_in_range(leverage):
     assert_leverage_safe(leverage)  # should not raise

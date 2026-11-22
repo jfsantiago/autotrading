@@ -6,6 +6,18 @@ from autotrading.secrets import Secrets
 
 MAX_LEVERAGE_CEILING = 10  # hard ceiling in code, independent of whatever the YAML says
 
+# Binance quotes futures contracts for a handful of extremely low-priced
+# tokens in units of 1000 (to avoid excessive decimal precision) - the
+# futures base ticker differs from the spot one. Confirmed live: spot
+# "PEPE/USDT" has no "PEPE/USDT:USDT" futures market, only
+# "1000PEPE/USDT:USDT". Add entries here if the universe ever includes
+# another such token (e.g. 1000SHIB, 1000BONK, 1000FLOKI have existed).
+# Deliberately NOT used by news/sources (NewsData.io, CoinMarketCal) — those
+# need the real spot ticker to match real-world coin databases.
+FUTURES_BASE_SYMBOL_OVERRIDES = {
+    "PEPE": "1000PEPE",
+}
+
 
 def to_futures_symbol(symbol: str, quote_currency: str = "USDT") -> str:
     """'BTC/USDT' -> 'BTC/USDT:USDT' (ccxt's unified symbol for a USDT-margined
@@ -17,7 +29,9 @@ def to_futures_symbol(symbol: str, quote_currency: str = "USDT") -> str:
             f"Symbol {symbol!r} does not end in {suffix!r}; only {quote_currency}-margined "
             "linear perpetuals are supported."
         )
-    return f"{symbol}:{quote_currency}"
+    base = symbol[: -len(suffix)]
+    base = FUTURES_BASE_SYMBOL_OVERRIDES.get(base, base)
+    return f"{base}/{quote_currency}:{quote_currency}"
 
 
 def assert_leverage_safe(leverage: int, ceiling: int = MAX_LEVERAGE_CEILING) -> None:
