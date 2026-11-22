@@ -1,12 +1,45 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import yaml
+from dotenv import load_dotenv
 
 from autotrading.news.config import NewsConfig, load_news_config
+
+# Env vars that override the matching YAML value, for runtime tuning without
+# editing/redeploying the config file — the intended on-ramp for a future
+# Telegram-driven control bot. Checked at load time, not polled continuously.
+ENV_POSITION_SIZE_PCT = "AUTOTRADING_POSITION_SIZE_PCT"
+ENV_LEVERAGE = "AUTOTRADING_LEVERAGE"
+
+# Hard ceiling on risk-per-trade, independent of YAML or env var overrides —
+# same defense-in-depth spirit as execution/client.py's MAX_LEVERAGE_CEILING.
+# Exposing position_size_pct to env-var (and later Telegram) control makes
+# this more important, not less: an external control surface could someday
+# set something unsafe, and this is the last line of defense in code.
+MAX_POSITION_SIZE_PCT_CEILING = 0.25
+
+
+def _env_override(name: str, yaml_value: Any) -> Any:
+    # `or None` also treats an empty string as absent — python-dotenv sets
+    # the var to "" (not unset) for a blank "KEY=" line in .env.
+    value = os.environ.get(name) or None
+    return value if value is not None else yaml_value
+
+
+def assert_position_size_safe(
+    position_size_pct: float, ceiling: float = MAX_POSITION_SIZE_PCT_CEILING
+) -> None:
+    if position_size_pct <= 0 or position_size_pct > ceiling:
+        raise ValueError(
+            f"position_size_pct {position_size_pct} is outside the allowed range "
+            f"(0, {ceiling}]. This ceiling is hardcoded as a safety invariant, "
+            "not configurable."
+        )
 
 
 @dataclass
@@ -103,6 +136,7 @@ class AppConfig:
 
 
 def load_config(path: str | Path) -> AppConfig:
+    load_dotenv()  # allow env var overrides below, whether set via shell or .env
     raw = yaml.safe_load(Path(path).read_text())
 
     universe = raw["universe"]
@@ -127,7 +161,9 @@ def load_config(path: str | Path) -> AppConfig:
         ),
         strategy_params=dict(raw["strategy_params"]),
         risk=RiskParameters(
-            position_size_pct=float(risk["position_size_pct"]),
+            position_size_pct=float(
+                _env_override(ENV_POSITION_SIZE_PCT, risk["position_size_pct"])
+            ),
             stop_loss_pct=float(risk["stop_loss_pct"]),
             take_profit_pct=float(risk["take_profit_pct"]),
             max_concurrent_positions=int(risk["max_concurrent_positions"]),
@@ -143,7 +179,11 @@ def load_config(path: str | Path) -> AppConfig:
             ),
         ),
         futures=FuturesConfig(
-            leverage=int(futures_raw.get("leverage", DEFAULT_FUTURES_LEVERAGE)),
+            leverage=int(
+                _env_override(
+                    ENV_LEVERAGE, futures_raw.get("leverage", DEFAULT_FUTURES_LEVERAGE)
+                )
+            ),
             quote_currency=futures_raw.get("quote_currency", DEFAULT_FUTURES_QUOTE_CURRENCY),
         ),
         news=load_news_config(raw.get("news")),

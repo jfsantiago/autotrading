@@ -1,4 +1,11 @@
-from autotrading.config import load_config
+import pytest
+
+from autotrading.config import (
+    ENV_LEVERAGE,
+    ENV_POSITION_SIZE_PCT,
+    assert_position_size_safe,
+    load_config,
+)
 
 MINIMAL_CONFIG = """
 exchange: binance
@@ -62,3 +69,50 @@ def test_default_yaml_loads_end_to_end():
     assert config.news is not None
     assert config.decision.news_veto_threshold == -0.5
     assert len(config.all_symbols) > 0
+
+
+def test_env_var_overrides_position_size_and_leverage(tmp_path, monkeypatch):
+    path = tmp_path / "config.yaml"
+    path.write_text(MINIMAL_CONFIG + "\nfutures:\n  leverage: 4\n")
+
+    monkeypatch.setenv(ENV_POSITION_SIZE_PCT, "0.08")
+    monkeypatch.setenv(ENV_LEVERAGE, "6")
+
+    config = load_config(path)
+
+    assert config.risk.position_size_pct == 0.08
+    assert config.futures.leverage == 6
+
+
+def test_blank_env_var_falls_back_to_yaml(tmp_path, monkeypatch):
+    path = tmp_path / "config.yaml"
+    path.write_text(MINIMAL_CONFIG)
+
+    # python-dotenv sets a blank "KEY=" line to "", not unset — must not
+    # break float()/int() conversion.
+    monkeypatch.setenv(ENV_POSITION_SIZE_PCT, "")
+
+    config = load_config(path)
+
+    assert config.risk.position_size_pct == 0.04  # from YAML, unaffected
+
+
+def test_unset_env_var_falls_back_to_yaml(tmp_path, monkeypatch):
+    path = tmp_path / "config.yaml"
+    path.write_text(MINIMAL_CONFIG)
+    monkeypatch.delenv(ENV_POSITION_SIZE_PCT, raising=False)
+
+    config = load_config(path)
+
+    assert config.risk.position_size_pct == 0.04
+
+
+@pytest.mark.parametrize("value", [0.01, 0.04, 0.25])
+def test_assert_position_size_safe_accepts_in_range(value):
+    assert_position_size_safe(value)  # should not raise
+
+
+@pytest.mark.parametrize("value", [0, -0.1, 0.26, 1.0])
+def test_assert_position_size_safe_rejects_out_of_range(value):
+    with pytest.raises(ValueError):
+        assert_position_size_safe(value)

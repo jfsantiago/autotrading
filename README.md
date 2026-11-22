@@ -29,6 +29,8 @@ pytest tests/ -v
 
 El comando `news`/`decide` requieren secrets en un archivo `.env` (copiar desde `.env.example`). Solo `OPENAI_API_KEY` es obligatoria; `NEWSDATA_API_KEY` y `COINMARKETCAL_API_KEY` son opcionales. `trade` además requiere `BINANCE_DEMO_API_KEY` / `BINANCE_DEMO_API_SECRET` (de Binance Demo Trading, demo.binance.com — reemplazó al viejo Futures Testnet).
 
+`risk.position_size_pct` (tamaño de posición) y `futures.leverage` (apalancamiento) también se pueden sobrescribir con variables de entorno (`AUTOTRADING_POSITION_SIZE_PCT`, `AUTOTRADING_LEVERAGE`, vía `.env` o exportadas en la shell) sin tocar el YAML — es el primer paso hacia el control en caliente por Telegram. Ambas tienen un techo de seguridad hardcodeado en el código (25% y 10x respectivamente) que ninguna variable puede saltarse.
+
 ## Estado
 
 **Fase 1 completa**: motor de backtesting con datos históricos de Binance (público, sin API key), dos estrategias (`stable_trend` para cripto mayor, `volatile_breakout` para cripto volátil), riesgo configurable (tamaño de posición, stop-loss, take-profit, posiciones concurrentes) vía `configs/default.yaml`, y reporte de métricas (win rate, retorno, drawdown) en consola y CSV.

@@ -6,7 +6,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from autotrading.config import AppConfig, load_config
+from autotrading.config import AppConfig, assert_position_size_safe, load_config
 from autotrading.data.cache import get_cached_ohlcv
 from autotrading.data.exchange import fetch_ohlcv_range, make_public_client
 from autotrading.decision.engine import OrderAction, decide, decide_trade_action
@@ -202,6 +202,7 @@ def run_trade_command(args: argparse.Namespace) -> int:
 
     try:
         assert_leverage_safe(config.futures.leverage)
+        assert_position_size_safe(config.risk.position_size_pct)
         futures_client = make_futures_demo_client(secrets)
     except (ValueError, RuntimeError) as exc:
         print(f"Error: {exc}")
