@@ -57,7 +57,7 @@ def build_news_snapshot(config: AppConfig, secrets: Secrets) -> NewsSnapshot:
         client,
         rss_items,
         config.all_symbols,
-        cache_dir,
+        secrets,
         news_cfg.sentiment.llm_model,
         news_cfg.sentiment.llm_batch_size,
     )

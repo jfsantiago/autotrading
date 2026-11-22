@@ -5,3 +5,4 @@ pyyaml
 feedparser
 requests
 openai
+psycopg2-binary

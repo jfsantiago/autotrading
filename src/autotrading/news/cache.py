@@ -7,7 +7,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+import psycopg2
+from psycopg2.extras import execute_values
+
 from autotrading.news.models import LLMClassification, SentimentLabel
+from autotrading.secrets import Secrets
 
 logger = logging.getLogger(__name__)
 
@@ -43,34 +47,54 @@ def get_cached_raw(
     return data
 
 
-def _classification_path(cache_dir: Path, item_id: str) -> Path:
-    return cache_dir / "llm" / f"{_hash_key(item_id)}.json"
+def get_cached_classifications(
+    secrets: Secrets, item_ids: list[str]
+) -> dict[str, LLMClassification]:
+    """Permanent classification cache, backed by Supabase Postgres so it
+    survives across ephemeral GitHub Actions runs (a local file cache would
+    be empty on every scheduled run, defeating the whole point of caching).
+    One bulk query per call, not one connection per headline.
+    """
+    if not item_ids:
+        return {}
 
-
-def get_cached_classification(cache_dir: Path, item_id: str) -> LLMClassification | None:
-    path = _classification_path(cache_dir, item_id)
-    if not path.exists():
-        return None
-
-    payload = json.loads(path.read_text())
-    return LLMClassification(
-        label=SentimentLabel(payload["label"]),
-        confidence=payload["confidence"],
-        relevant_symbols=payload["relevant_symbols"],
-    )
-
-
-def save_classification(
-    cache_dir: Path, item_id: str, classification: LLMClassification
-) -> None:
-    path = _classification_path(cache_dir, item_id)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(
-            {
-                "label": classification.label.value,
-                "confidence": classification.confidence,
-                "relevant_symbols": classification.relevant_symbols,
-            }
+    with psycopg2.connect(secrets.supabase_db_url) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT item_id, label, confidence, relevant_symbols "
+            "FROM llm_classification_cache WHERE item_id = ANY(%s)",
+            (item_ids,),
         )
-    )
+        rows = cur.fetchall()
+
+    return {
+        item_id: LLMClassification(
+            label=SentimentLabel(label),
+            confidence=confidence,
+            relevant_symbols=list(symbols),
+        )
+        for item_id, label, confidence, symbols in rows
+    }
+
+
+def save_classifications(
+    secrets: Secrets, classifications: dict[str, LLMClassification]
+) -> None:
+    if not classifications:
+        return
+
+    rows = [
+        (item_id, c.label.value, c.confidence, json.dumps(c.relevant_symbols))
+        for item_id, c in classifications.items()
+    ]
+    with psycopg2.connect(secrets.supabase_db_url) as conn, conn.cursor() as cur:
+        execute_values(
+            cur,
+            "INSERT INTO llm_classification_cache "
+            "(item_id, label, confidence, relevant_symbols) VALUES %s "
+            "ON CONFLICT (item_id) DO UPDATE SET "
+            "label = EXCLUDED.label, confidence = EXCLUDED.confidence, "
+            "relevant_symbols = EXCLUDED.relevant_symbols",
+            rows,
+            template="(%s, %s, %s, %s::jsonb)",
+        )
+        conn.commit()

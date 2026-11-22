@@ -41,7 +41,12 @@ def make_app_config(tmp_path, macro_file):
 
 
 def make_secrets():
-    return Secrets(openai_api_key="fake-key", newsdata_api_key=None, coinmarketcal_api_key=None)
+    return Secrets(
+        openai_api_key="fake-key",
+        supabase_db_url="postgresql://fake",
+        newsdata_api_key=None,
+        coinmarketcal_api_key=None,
+    )
 
 
 def fake_chat_response(classifications):
@@ -76,6 +81,11 @@ def test_build_news_snapshot_end_to_end(tmp_path):
     with (
         patch("autotrading.news.pipeline.fetch_rss_items", return_value=[rss_item]),
         patch("openai.OpenAI", return_value=fake_openai_client),
+        patch(
+            "autotrading.news.llm_sentiment.news_cache.get_cached_classifications",
+            return_value={},
+        ),
+        patch("autotrading.news.llm_sentiment.news_cache.save_classifications"),
     ):
         snapshot = build_news_snapshot(config, secrets)
 

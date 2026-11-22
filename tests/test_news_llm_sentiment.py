@@ -1,9 +1,11 @@
 import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from autotrading.news.llm_sentiment import classify_headlines_batch
 from autotrading.news.models import NewsItem, SentimentLabel
+from autotrading.secrets import Secrets
 
 
 def make_item(item_id):
@@ -41,7 +43,30 @@ class FakeClient:
         return self._responses.pop(0)
 
 
-def test_classify_batches_calls(tmp_path):
+def make_secrets():
+    return Secrets(
+        openai_api_key="k",
+        supabase_db_url="postgresql://fake",
+        newsdata_api_key=None,
+        coinmarketcal_api_key=None,
+    )
+
+
+def fake_cache_backend(store: dict):
+    """In-memory stand-in for the Supabase-backed classification cache, so
+    tests can verify cache-hit behavior across calls without a real DB.
+    """
+
+    def get_cached(secrets, item_ids):
+        return {item_id: store[item_id] for item_id in item_ids if item_id in store}
+
+    def save(secrets, classifications):
+        store.update(classifications)
+
+    return get_cached, save
+
+
+def test_classify_batches_calls():
     items = [make_item("a"), make_item("b"), make_item("c")]
     responses = [
         make_chat_completion_response(
@@ -55,10 +80,15 @@ def test_classify_batches_calls(tmp_path):
         ),
     ]
     client = FakeClient(responses)
+    get_cached, save = fake_cache_backend({})
 
-    results = classify_headlines_batch(
-        client, items, ["BTC/USDT"], tmp_path, model="fake-model", batch_size=2
-    )
+    with (
+        patch("autotrading.news.llm_sentiment.news_cache.get_cached_classifications", get_cached),
+        patch("autotrading.news.llm_sentiment.news_cache.save_classifications", save),
+    ):
+        results = classify_headlines_batch(
+            client, items, ["BTC/USDT"], make_secrets(), model="fake-model", batch_size=2
+        )
 
     assert client.call_count == 2
     assert results["a"].label == SentimentLabel.BULLISH
@@ -66,7 +96,7 @@ def test_classify_batches_calls(tmp_path):
     assert results["c"].label == SentimentLabel.NEUTRAL
 
 
-def test_classify_uses_cache_on_second_call(tmp_path):
+def test_classify_uses_cache_on_second_call():
     items = [make_item("a")]
     responses = [
         make_chat_completion_response(
@@ -74,15 +104,21 @@ def test_classify_uses_cache_on_second_call(tmp_path):
         )
     ]
     client = FakeClient(responses)
+    store: dict = {}
+    get_cached, save = fake_cache_backend(store)
 
-    classify_headlines_batch(client, items, ["BTC/USDT"], tmp_path, "fake-model", 10)
-    results = classify_headlines_batch(client, items, ["BTC/USDT"], tmp_path, "fake-model", 10)
+    with (
+        patch("autotrading.news.llm_sentiment.news_cache.get_cached_classifications", get_cached),
+        patch("autotrading.news.llm_sentiment.news_cache.save_classifications", save),
+    ):
+        classify_headlines_batch(client, items, ["BTC/USDT"], make_secrets(), "fake-model", 10)
+        results = classify_headlines_batch(client, items, ["BTC/USDT"], make_secrets(), "fake-model", 10)
 
     assert client.call_count == 1  # second call served entirely from cache
     assert results["a"].label == SentimentLabel.BULLISH
 
 
-def test_classify_falls_back_to_neutral_on_missing_id(tmp_path):
+def test_classify_falls_back_to_neutral_on_missing_id():
     items = [make_item("a"), make_item("b")]
     responses = [
         make_chat_completion_response(
@@ -90,8 +126,13 @@ def test_classify_falls_back_to_neutral_on_missing_id(tmp_path):
         )
     ]
     client = FakeClient(responses)
+    get_cached, save = fake_cache_backend({})
 
-    results = classify_headlines_batch(client, items, ["BTC/USDT"], tmp_path, "fake-model", 10)
+    with (
+        patch("autotrading.news.llm_sentiment.news_cache.get_cached_classifications", get_cached),
+        patch("autotrading.news.llm_sentiment.news_cache.save_classifications", save),
+    ):
+        results = classify_headlines_batch(client, items, ["BTC/USDT"], make_secrets(), "fake-model", 10)
 
     assert results["a"].label == SentimentLabel.BULLISH
     assert results["b"].label == SentimentLabel.NEUTRAL

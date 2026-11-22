@@ -20,6 +20,7 @@ autotrading news --config configs/default.yaml
 autotrading decide --config configs/default.yaml
 autotrading trade --config configs/default.yaml              # preview, no coloca órdenes
 autotrading trade --config configs/default.yaml --confirm     # coloca órdenes reales en Demo Trading
+autotrading scheduled-run --config configs/default.yaml       # wrapper para cron/CI, respeta kill switch e intervalo
 pytest tests/ -v
 ```
 
@@ -27,7 +28,7 @@ pytest tests/ -v
 
 `trade` sí es consciente de la posición real (consulta el exchange) y, con `--confirm`, coloca órdenes de verdad contra el **Binance Demo Trading** (dinero ficticio). Sin `--confirm` solo muestra el preview, igual que `decide` pero con la posición real incluida.
 
-El comando `news`/`decide` requieren secrets en un archivo `.env` (copiar desde `.env.example`). Solo `OPENAI_API_KEY` es obligatoria; `NEWSDATA_API_KEY` y `COINMARKETCAL_API_KEY` son opcionales. `trade` además requiere `BINANCE_DEMO_API_KEY` / `BINANCE_DEMO_API_SECRET` (de Binance Demo Trading, demo.binance.com — reemplazó al viejo Futures Testnet).
+El comando `news`/`decide` requieren secrets en un archivo `.env` (copiar desde `.env.example`). `OPENAI_API_KEY` y `SUPABASE_DB_URL` son obligatorias (la segunda guarda el cache permanente de clasificaciones LLM en Postgres, necesario para que sobreviva entre corridas de GitHub Actions); `NEWSDATA_API_KEY` y `COINMARKETCAL_API_KEY` son opcionales. `trade` además requiere `BINANCE_DEMO_API_KEY` / `BINANCE_DEMO_API_SECRET` (de Binance Demo Trading, demo.binance.com — reemplazó al viejo Futures Testnet). Antes del primer uso, correr `supabase/schema.sql` una vez en el SQL editor de Supabase.
 
 `risk.position_size_pct` (tamaño de posición) y `futures.leverage` (apalancamiento) también se pueden sobrescribir con variables de entorno (`AUTOTRADING_POSITION_SIZE_PCT`, `AUTOTRADING_LEVERAGE`, vía `.env` o exportadas en la shell) sin tocar el YAML — es el primer paso hacia el control en caliente por Telegram. Ambas tienen un techo de seguridad hardcodeado en el código (25% y 10x respectivamente) que ninguna variable puede saltarse.
 
@@ -41,4 +42,6 @@ El comando `news`/`decide` requieren secrets en un archivo `.env` (copiar desde 
 
 **Fase 4 completa**: ejecución en Binance USD-M Futures (Demo Trading) (`autotrading trade`). Cambio de spot a futuros para poder ir short (apostar a la baja), apalancamiento configurable (default 4x, techo duro de 10x en código), margen siempre aislado (hardcoded, nunca cross) y stop-loss real colocado en el exchange (no solo en memoria) inmediatamente después de abrir cualquier posición — así una posición queda protegida aunque el proceso se caiga. La señal técnica sigue viniendo de datos spot (sin cambios); solo posiciones y órdenes pasan por el cliente de futuros. El veto de noticias ahora es simétrico: bajista bloquea abrir long, alcista bloquea abrir short. Sigue siendo **demo trading** (dinero ficticio) — nada de esto toca dinero real todavía.
 
-**Pendiente** (siguientes fases): validar `trade --confirm` con keys reales de Binance Demo Trading, luego ejecución con capital real mínimo (solo tras observar el demo funcionando correctamente), despliegue 24/7, bot de Telegram como panel de administración.
+**Fase 5 completa**: despliegue 24/7 (`autotrading scheduled-run`) vía GitHub Actions (heartbeat cada 15 min, repo público = minutos ilimitados gratis) + Supabase (Postgres gratis). El cache de clasificación LLM se movió de archivos locales a una tabla Postgres (`llm_classification_cache`) — imprescindible porque cada corrida de GitHub Actions es una VM nueva y efímera, sin eso se reclasificaría todo desde cero cada vez. El intervalo real de trading (empieza en 60 min) y un interruptor de apagado (`bot_state.bot_enabled`, arranca en `false`) viven en otra tabla (`bot_state`) — ajustables sin tocar código, pensado como base para el control futuro por Telegram. `scheduled-run` solo llama a Binance/OpenAI/RSS cuando realmente toca ejecutar; el resto de los heartbeats se saltan gratis.
+
+**Pendiente** (siguientes fases): correr `supabase/schema.sql`, configurar los secrets en GitHub Actions, validar un disparo manual (`--dry-run`) antes de prender `bot_enabled`, luego observar las primeras corridas reales; más adelante, bot de Telegram como panel de administración, y — como decisión aparte, no automática — el camino hacia capital real.

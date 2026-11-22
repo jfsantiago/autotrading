@@ -27,6 +27,7 @@ def make_fake_config():
 def make_fake_secrets():
     return Secrets(
         openai_api_key="k",
+        supabase_db_url="postgresql://fake",
         newsdata_api_key=None,
         coinmarketcal_api_key=None,
         binance_demo_api_key="tk",

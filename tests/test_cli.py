@@ -24,7 +24,12 @@ def test_decide_command_dry_run_no_network(tmp_path, capsys):
         strategy_for_symbol=lambda s: "stable_trend",
         strategy_params={"stable_trend": {}},
     )
-    fake_secrets = Secrets(openai_api_key="k", newsdata_api_key=None, coinmarketcal_api_key=None)
+    fake_secrets = Secrets(
+        openai_api_key="k",
+        supabase_db_url="postgresql://fake",
+        newsdata_api_key=None,
+        coinmarketcal_api_key=None,
+    )
     fake_snapshot = NewsSnapshot(scored_items=[], symbol_sentiments={}, upcoming_events=[])
 
     with (

@@ -26,6 +26,7 @@ from autotrading.execution.report import (
 from autotrading.news.pipeline import build_news_snapshot
 from autotrading.news.report import print_news_summary, save_news_results
 from autotrading.reporting.report import report
+from autotrading.scheduling import ensure_bot_state_row, fetch_bot_state, is_due, mark_run_completed
 from autotrading.secrets import load_secrets
 from autotrading.strategies import STRATEGY_REGISTRY
 from autotrading.utils.timeutils import parse_date_to_ms
@@ -63,6 +64,20 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     trade_parser.add_argument("--symbol", help="Restrict to a single symbol (spot notation)")
     trade_parser.add_argument("--output", help="Override results output dir for this run")
+
+    scheduled_parser = subparsers.add_parser(
+        "scheduled-run",
+        help="Kill-switch + due-check wrapper around `trade --confirm`, for cron/CI use",
+    )
+    scheduled_parser.add_argument("--config", required=True, help="Path to a YAML config file")
+    scheduled_parser.add_argument("--symbol", help="Restrict to a single symbol (spot notation)")
+    scheduled_parser.add_argument("--output", help="Override results output dir for this run")
+    scheduled_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Force a preview-only trade run now, bypassing the kill switch and due-check "
+        "(doesn't touch bot_state) — for verifying the pipeline from CI without risk",
+    )
 
     return parser
 
@@ -291,6 +306,42 @@ def run_trade_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_scheduled_command(args: argparse.Namespace) -> int:
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+
+    try:
+        secrets = load_secrets()
+    except RuntimeError as exc:
+        print(f"Error: {exc}")
+        return 1
+
+    if args.dry_run:
+        print("DRY RUN: bypassing kill switch / due-check. No orders placed; state not updated.")
+        args.confirm = False
+        return run_trade_command(args)
+
+    ensure_bot_state_row(secrets)
+    state = fetch_bot_state(secrets)
+
+    if not state.bot_enabled:
+        print("Bot disabled (bot_state.bot_enabled = false) — skipping, no API calls made.")
+        return 0
+
+    now = datetime.now(timezone.utc)
+    if not is_due(state, now):
+        print(
+            f"Not due yet (last run {state.last_run_at}, interval "
+            f"{state.run_interval_minutes}m) — skipping."
+        )
+        return 0
+
+    args.confirm = True
+    exit_code = run_trade_command(args)
+    if exit_code == 0:
+        mark_run_completed(secrets, now)
+    return exit_code
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_arg_parser()
     args = parser.parse_args(argv)
@@ -303,6 +354,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_decide_command(args)
     if args.command == "trade":
         return run_trade_command(args)
+    if args.command == "scheduled-run":
+        return run_scheduled_command(args)
 
     parser.print_help()
     return 1
