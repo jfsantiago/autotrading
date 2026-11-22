@@ -50,10 +50,10 @@ def get_cached_raw(
 def get_cached_classifications(
     secrets: Secrets, item_ids: list[str]
 ) -> dict[str, LLMClassification]:
-    """Permanent classification cache, backed by Supabase Postgres so it
-    survives across ephemeral GitHub Actions runs (a local file cache would
-    be empty on every scheduled run, defeating the whole point of caching).
-    One bulk query per call, not one connection per headline.
+    """Permanent classification cache, backed by Supabase Postgres so it's
+    shared between the scheduled VPS runs and any local/manual run (and
+    survives a server rebuild), rather than being private to one machine's
+    disk. One bulk query per call, not one connection per headline.
     """
     if not item_ids:
         return {}

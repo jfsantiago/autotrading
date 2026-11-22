@@ -21,10 +21,10 @@ def load_secrets() -> Secrets:
 
     OPENAI_API_KEY and SUPABASE_DB_URL are required — without the first
     there's no way to classify headlines, without the second there's no
-    permanent cache for those classifications (Supabase Postgres, survives
-    across ephemeral GitHub Actions runs unlike a local file cache). The
-    others degrade their respective sources to disabled rather than
-    failing the whole run.
+    permanent cache for those classifications (Supabase Postgres, shared
+    between the scheduled VPS runs and any local/manual run). The others
+    degrade their respective sources to disabled rather than failing the
+    whole run.
     """
     load_dotenv()
 

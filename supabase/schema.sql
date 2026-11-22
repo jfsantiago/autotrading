@@ -3,10 +3,10 @@
 -- `scheduled-run`. Not applied automatically — two tables don't justify a
 -- migrations framework for a solo project.
 
--- Permanent LLM classification cache — survives across all GitHub Actions
--- runs. A headline is classified via OpenAI exactly once, ever, regardless
--- of how many times `news`/`decide`/`trade`/`scheduled-run` later ask about
--- it (locally or in CI).
+-- Permanent LLM classification cache, shared between the scheduled VPS
+-- runs and any local/manual run. A headline is classified via OpenAI
+-- exactly once, ever, regardless of how many times
+-- `news`/`decide`/`trade`/`scheduled-run` later ask about it.
 create table if not exists llm_classification_cache (
     item_id          text primary key,
     label            text not null check (label in ('bullish', 'bearish', 'neutral')),

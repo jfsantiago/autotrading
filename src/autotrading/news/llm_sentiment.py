@@ -83,9 +83,10 @@ def classify_headlines_batch(
     batch_size: int,
 ) -> dict[str, LLMClassification]:
     """Classify items needing LLM sentiment (those without a native_label),
-    using a permanent cache (Supabase Postgres, survives across ephemeral
-    GitHub Actions runs) and batched structured-output calls so each
-    headline is only ever classified once, ever.
+    using a permanent cache (Supabase Postgres, shared between the
+    scheduled VPS runs and any local/manual run) and batched
+    structured-output calls so each headline is only ever classified
+    once, ever.
     """
     item_ids = [item.item_id for item in items]
     cached = news_cache.get_cached_classifications(secrets, item_ids)
