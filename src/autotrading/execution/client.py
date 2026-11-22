@@ -54,4 +54,5 @@ def make_futures_demo_client(secrets: Secrets) -> ccxt.binance:
         }
     )
     client.enable_demo_trading(True)
+    client.load_markets()  # ensures amount_to_precision/price_to_precision work downstream
     return client

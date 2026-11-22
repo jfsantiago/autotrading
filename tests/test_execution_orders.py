@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 import pytest
 
@@ -69,7 +69,8 @@ def test_other_margin_mode_error_propagates():
 
 def test_close_position_sends_reduce_only_opposite_side_and_cancels_orders():
     client = MagicMock()
-    client.create_order = MagicMock(return_value={"id": "close-1", "average": 50100.0})
+    client.create_order = MagicMock(return_value={"id": "close-1", "average": None})
+    client.fetch_order = MagicMock(return_value={"id": "close-1", "average": 50100.0})
     client.amount_to_precision = MagicMock(side_effect=lambda symbol, amount: amount)
 
     position = PositionState(symbol="BTC/USDT", side=PositionSide.LONG, size=1.5, entry_price=50000.0)
@@ -78,14 +79,19 @@ def test_close_position_sends_reduce_only_opposite_side_and_cancels_orders():
     client.create_order.assert_called_once_with(
         "BTC/USDT:USDT", "market", "sell", 1.5, None, {"reduceOnly": True}
     )
-    client.cancel_all_orders.assert_called_once_with("BTC/USDT:USDT")
+    client.fetch_order.assert_called_once_with("close-1", "BTC/USDT:USDT")
+    assert client.cancel_all_orders.call_args_list == [
+        call("BTC/USDT:USDT"),
+        call("BTC/USDT:USDT", {"trigger": True}),
+    ]
     assert result.action == "close"
     assert result.filled_price == 50100.0
 
 
 def test_close_short_position_sends_buy_side():
     client = MagicMock()
-    client.create_order = MagicMock(return_value={"id": "close-2", "average": 2950.0})
+    client.create_order = MagicMock(return_value={"id": "close-2", "average": None})
+    client.fetch_order = MagicMock(return_value={"id": "close-2", "average": 2950.0})
     client.amount_to_precision = MagicMock(side_effect=lambda symbol, amount: amount)
 
     position = PositionState(symbol="ETH/USDT", side=PositionSide.SHORT, size=2.0, entry_price=3000.0)

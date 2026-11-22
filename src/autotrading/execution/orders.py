@@ -121,10 +121,22 @@ def close_position(
     entry_order = client.create_order(
         futures_symbol, "market", close_side, quantity, None, {"reduceOnly": True}
     )
+    # A market order's immediate response often lacks the average fill price
+    # (seen live: "average": None right after placement) — re-fetch it for
+    # the authoritative value, same reasoning as open_long/open_short
+    # re-fetching position state instead of trusting the entry response.
+    filled_order = client.fetch_order(entry_order.get("id"), futures_symbol)
+
     # The stop-loss placed when this position opened doesn't auto-cancel on a
     # separate close order — clean it up so it can't misfire on a future
-    # unrelated position on the same symbol.
+    # unrelated position on the same symbol. STOP_MARKET orders are Binance
+    # "algo"/conditional orders, a separate bucket from regular orders —
+    # cancelling both is needed to actually remove the stop (confirmed via a
+    # live demo-account test: the STOP_MARKET order came back with an
+    # 'algoId' in its raw info, and plain cancel_all_orders silently left it
+    # in place; passing trigger=True routes to the algo-order endpoint).
     client.cancel_all_orders(futures_symbol)
+    client.cancel_all_orders(futures_symbol, {"trigger": True})
 
     return OrderResult(
         symbol=symbol,
@@ -132,5 +144,5 @@ def close_position(
         entry_order=entry_order,
         stop_order=None,
         filled_quantity=position.size,
-        filled_price=entry_order.get("average"),
+        filled_price=filled_order.get("average"),
     )
