@@ -29,23 +29,29 @@ def assert_leverage_safe(leverage: int, ceiling: int = MAX_LEVERAGE_CEILING) -> 
 
 
 def require_execution_secrets(secrets: Secrets) -> None:
-    if not secrets.binance_testnet_api_key or not secrets.binance_testnet_api_secret:
+    if not secrets.binance_demo_api_key or not secrets.binance_demo_api_secret:
         raise RuntimeError(
-            "BINANCE_TESTNET_API_KEY / BINANCE_TESTNET_API_SECRET are not set. "
-            "Get them from https://testnet.binancefuture.com/ (a separate signup, "
-            "not your real Binance account) and add them to .env."
+            "BINANCE_DEMO_API_KEY / BINANCE_DEMO_API_SECRET are not set. "
+            "Binance retired the old Futures Testnet — get new keys from "
+            "https://demo.binance.com/en/my/settings/api-management "
+            "(old testnet.binancefuture.com keys will NOT work) and add them to .env."
         )
 
 
-def make_futures_testnet_client(secrets: Secrets) -> ccxt.binance:
+def make_futures_demo_client(secrets: Secrets) -> ccxt.binance:
+    """Client for Binance's Demo Trading environment (demo.binance.com),
+    which replaced the old Futures Testnet. ccxt's set_sandbox_mode() no
+    longer works for futures private endpoints — enable_demo_trading() is
+    the current mechanism (and is mutually exclusive with sandbox mode).
+    """
     require_execution_secrets(secrets)
     client = ccxt.binance(
         {
-            "apiKey": secrets.binance_testnet_api_key,
-            "secret": secrets.binance_testnet_api_secret,
+            "apiKey": secrets.binance_demo_api_key,
+            "secret": secrets.binance_demo_api_secret,
             "enableRateLimit": True,
             "options": {"defaultType": "future"},
         }
     )
-    client.set_sandbox_mode(True)
+    client.enable_demo_trading(True)
     return client

@@ -13,7 +13,7 @@ from autotrading.decision.engine import OrderAction, decide, decide_trade_action
 from autotrading.decision.market import get_latest_signal
 from autotrading.decision.report import print_decisions, save_decisions
 from autotrading.engine.backtester import run_backtest
-from autotrading.execution.client import assert_leverage_safe, make_futures_testnet_client
+from autotrading.execution.client import assert_leverage_safe, make_futures_demo_client
 from autotrading.execution.orders import calculate_position_size, close_position, open_long, open_short
 from autotrading.execution.positions import get_position_state
 from autotrading.execution.report import (
@@ -55,11 +55,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
     trade_parser = subparsers.add_parser(
         "trade",
-        help="Position-aware Binance Futures TESTNET execution: preview, or place orders with --confirm",
+        help="Position-aware Binance Futures DEMO TRADING execution: preview, or place orders with --confirm",
     )
     trade_parser.add_argument("--config", required=True, help="Path to a YAML config file")
     trade_parser.add_argument(
-        "--confirm", action="store_true", help="Actually place orders on the Futures TESTNET"
+        "--confirm", action="store_true", help="Actually place orders on Binance Demo Trading"
     )
     trade_parser.add_argument("--symbol", help="Restrict to a single symbol (spot notation)")
     trade_parser.add_argument("--output", help="Override results output dir for this run")
@@ -202,7 +202,7 @@ def run_trade_command(args: argparse.Namespace) -> int:
 
     try:
         assert_leverage_safe(config.futures.leverage)
-        futures_client = make_futures_testnet_client(secrets)
+        futures_client = make_futures_demo_client(secrets)
     except (ValueError, RuntimeError) as exc:
         print(f"Error: {exc}")
         return 1

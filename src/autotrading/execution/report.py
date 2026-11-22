@@ -10,9 +10,9 @@ from autotrading.news.models import SymbolSentiment
 
 PREVIEW_BANNER = (
     "=" * 60
-    + "\nTRADE PREVIEW (testnet) — position-aware. No orders sent yet.\n"
-    + "Run again with --confirm to place these orders on the Binance\n"
-    + "Futures TESTNET (fake money, not a real account).\n"
+    + "\nTRADE PREVIEW (demo trading) — position-aware. No orders sent yet.\n"
+    + "Run again with --confirm to place these orders on Binance Demo\n"
+    + "Trading (fake money, not a real account).\n"
     + "=" * 60
 )
 
@@ -42,7 +42,7 @@ def print_trade_preview(
 
 def print_order_executed(decision: TradeDecision, result: OrderResult) -> None:
     print(EXECUTED_BANNER_TOP)
-    print(f"TESTNET ORDER EXECUTED (fake money) — {decision.symbol}: {result.action.upper()}")
+    print(f"DEMO ORDER EXECUTED (fake money) — {decision.symbol}: {result.action.upper()}")
     print(f"  entry order id: {result.entry_order.get('id')}   filled qty: {result.filled_quantity}")
     if result.filled_price is not None:
         print(f"  avg price: {result.filled_price}")
@@ -58,7 +58,7 @@ def print_no_action(decision: TradeDecision) -> None:
 
 
 def print_confirm_footer() -> None:
-    print("\nThese were Binance Futures TESTNET orders (fake money), not real trades.")
+    print("\nThese were Binance Demo Trading orders (fake money), not real trades.")
 
 
 def save_trade_results(

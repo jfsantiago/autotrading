@@ -29,8 +29,8 @@ def make_fake_secrets():
         openai_api_key="k",
         newsdata_api_key=None,
         coinmarketcal_api_key=None,
-        binance_testnet_api_key="tk",
-        binance_testnet_api_secret="ts",
+        binance_demo_api_key="tk",
+        binance_demo_api_secret="ts",
     )
 
 
@@ -50,7 +50,7 @@ def common_patches(tmp_path, flat_position=True):
             return_value=NewsSnapshot(scored_items=[], symbol_sentiments={}, upcoming_events=[]),
         ),
         patch("autotrading.cli.make_public_client", return_value=object()),
-        patch("autotrading.cli.make_futures_testnet_client", return_value=object()),
+        patch("autotrading.cli.make_futures_demo_client", return_value=object()),
         patch("autotrading.cli.get_latest_signal", return_value=(Signal.BUY, df)),
         patch("autotrading.cli.get_position_state", return_value=position),
     ]
@@ -76,7 +76,7 @@ def test_trade_with_confirm_opens_long(tmp_path):
     with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
         with patch("autotrading.cli.open_long", return_value=fake_result) as mock_open_long:
             with patch(
-                "autotrading.cli.make_futures_testnet_client"
+                "autotrading.cli.make_futures_demo_client"
             ) as mock_make_client:
                 mock_client = mock_make_client.return_value
                 mock_client.fetch_balance.return_value = {"USDT": {"total": 1000.0}}
@@ -91,7 +91,7 @@ def test_trade_with_confirm_opens_long(tmp_path):
 def test_trade_already_long_is_noop_even_with_confirm(tmp_path):
     patches = common_patches(tmp_path, flat_position=False)
     with patches[0], patches[1], patches[2], patches[3], patches[5], patches[6]:
-        with patch("autotrading.cli.make_futures_testnet_client") as mock_make_client:
+        with patch("autotrading.cli.make_futures_demo_client") as mock_make_client:
             mock_make_client.return_value.fetch_balance.return_value = {"USDT": {"total": 1000.0}}
             with patch("autotrading.cli.open_long") as mock_open_long, patch(
                 "autotrading.cli.close_position"
