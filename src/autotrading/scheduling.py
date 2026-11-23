@@ -77,6 +77,21 @@ def set_position_size_pct(secrets: Secrets, value: float | None) -> None:
         conn.commit()
 
 
+def set_bot_enabled(secrets: Secrets, enabled: bool) -> None:
+    """The emergency kill switch: run_scheduled_command checks this before
+    doing anything else, so flipping it to False stops the next heartbeat
+    from making any API calls at all, not just from placing orders. Does
+    NOT touch positions already open — those keep whatever stop-loss is
+    already resting on Binance regardless of whether this process is
+    running.
+    """
+    with psycopg2.connect(secrets.supabase_db_url) as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE bot_state SET bot_enabled = %s WHERE id = %s", (enabled, BOT_STATE_ROW_ID)
+        )
+        conn.commit()
+
+
 def is_due(state: BotState, now: datetime) -> bool:
     if state.last_run_at is None:
         return True

@@ -7,6 +7,7 @@ from autotrading.scheduling import (
     fetch_bot_state,
     is_due,
     mark_run_completed,
+    set_bot_enabled,
     set_leverage,
     set_position_size_pct,
 )
@@ -141,4 +142,17 @@ def test_set_position_size_pct_updates_column():
     query, params = cursor.execute.call_args.args
     assert "UPDATE bot_state" in query and "position_size_pct" in query
     assert params == (0.1, 1)
+    conn.commit.assert_called_once()
+
+
+def test_set_bot_enabled_updates_column():
+    cursor = MagicMock()
+    conn = make_mock_conn(cursor)
+
+    with patch("autotrading.scheduling.psycopg2.connect", return_value=conn):
+        set_bot_enabled(make_secrets(), False)
+
+    query, params = cursor.execute.call_args.args
+    assert "UPDATE bot_state" in query and "bot_enabled" in query
+    assert params == (False, 1)
     conn.commit.assert_called_once()

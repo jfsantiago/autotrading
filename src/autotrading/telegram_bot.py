@@ -19,7 +19,12 @@ from autotrading.config import AppConfig, assert_position_size_safe
 from autotrading.execution.client import assert_leverage_safe, to_futures_symbol
 from autotrading.execution.orders import close_position
 from autotrading.execution.positions import PositionSide, PositionState, get_position_state
-from autotrading.scheduling import fetch_bot_state, set_leverage, set_position_size_pct
+from autotrading.scheduling import (
+    fetch_bot_state,
+    set_bot_enabled,
+    set_leverage,
+    set_position_size_pct,
+)
 from autotrading.secrets import Secrets
 
 logger = logging.getLogger(__name__)
@@ -89,6 +94,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/balance — saldo total de la cuenta\n"
         "/close — cerrar una posición abierta manualmente\n"
         "/status — estado del bot (encendido/apagado, intervalo)\n"
+        "/pause — detener el bot de emergencia (no abre más operaciones)\n"
+        "/resume — reanudar el bot después de un /pause\n"
         "/settings — apalancamiento y tamaño de posición actuales\n"
         "/set_leverage — cambiar el apalancamiento\n"
         "/set_risk — cambiar el tamaño de posición"
@@ -106,12 +113,13 @@ def _fmt_num(value: float) -> str:
     return text or "0"
 
 
-_SIDE_LABELS = {"long": "largo", "short": "corto"}
+_SIDE_LABELS = {"long": "buy", "short": "sell"}
 
 
 def _fmt_side(side: str) -> str:
-    """long/short (the stored values, in English) -> largo/corto for
-    display — "short"/"long" aren't self-explanatory to a non-trader."""
+    """long/short (the stored values) -> buy/sell for display, matching
+    Binance's own terminology (requested directly, after "largo"/"corto"
+    caused confusion about which maps to which direction)."""
     return _SIDE_LABELS.get(side, side)
 
 
@@ -387,6 +395,34 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     )
 
 
+async def cmd_pause(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Emergency stop: flips bot_enabled off, which run_scheduled_command
+    checks before doing anything else — the next heartbeat skips entirely,
+    no API calls, no new positions. Does NOT touch positions already open;
+    their stop-loss keeps resting on Binance independently of this bot
+    process running or not.
+    """
+    secrets: Secrets = context.bot_data["secrets"]
+    if not await _guarded(update, secrets):
+        return
+
+    set_bot_enabled(secrets, False)
+    await update.message.reply_text(
+        "Bot PAUSADO. No se abrirán operaciones nuevas hasta que uses /resume.\n"
+        "Las posiciones ya abiertas siguen con su stop-loss activo en Binance, "
+        "esto no las cierra ni las desprotege."
+    )
+
+
+async def cmd_resume(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    secrets: Secrets = context.bot_data["secrets"]
+    if not await _guarded(update, secrets):
+        return
+
+    set_bot_enabled(secrets, True)
+    await update.message.reply_text("Bot REANUDADO. Vuelve a revisar y operar normalmente.")
+
+
 async def cmd_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     secrets: Secrets = context.bot_data["secrets"]
     if not await _guarded(update, secrets):
@@ -484,6 +520,8 @@ async def _set_command_menu(application: Application) -> None:
             BotCommand("balance", "Saldo total de la cuenta"),
             BotCommand("close", "Cerrar una posición abierta"),
             BotCommand("status", "Estado del bot"),
+            BotCommand("pause", "Detener el bot de emergencia"),
+            BotCommand("resume", "Reanudar el bot"),
             BotCommand("settings", "Apalancamiento y tamaño de posición"),
             BotCommand("set_leverage", "Cambiar el apalancamiento"),
             BotCommand("set_risk", "Cambiar el tamaño de posición"),
@@ -533,6 +571,8 @@ def run(config: AppConfig, secrets: Secrets, client: Any) -> None:
     application.add_handler(CommandHandler("balance", cmd_balance, filters=auth_filter))
     application.add_handler(CommandHandler("close", cmd_close, filters=auth_filter))
     application.add_handler(CommandHandler("status", cmd_status, filters=auth_filter))
+    application.add_handler(CommandHandler("pause", cmd_pause, filters=auth_filter))
+    application.add_handler(CommandHandler("resume", cmd_resume, filters=auth_filter))
     application.add_handler(CommandHandler("settings", cmd_settings, filters=auth_filter))
     application.add_handler(CommandHandler("set_leverage", cmd_set_leverage, filters=auth_filter))
     application.add_handler(CommandHandler("set_risk", cmd_set_risk, filters=auth_filter))

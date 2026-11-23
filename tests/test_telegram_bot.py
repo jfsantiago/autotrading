@@ -20,6 +20,8 @@ from autotrading.telegram_bot import (
     cmd_set_leverage,
     cmd_set_risk,
     cmd_settings,
+    cmd_pause,
+    cmd_resume,
     cmd_status,
     cmd_universe,
     notify,
@@ -233,7 +235,7 @@ def test_cmd_history_shows_recent_trades():
     assert "200" in text  # Cant. = margen real en USDT
     assert "10.0" in text or "+10.0000" in text
     assert "260101:1200" in text  # date format "YYMMDD:HHMM" (2-digit year)
-    assert "largo" in text  # "long" translated for display
+    assert "buy" in text  # "long" -> "buy" for display
     assert "bot" in text  # closed_via == "bot" shown in the "Vía" column
 
 
@@ -290,6 +292,44 @@ def test_cmd_status_shows_bot_state():
     text = update.message.reply_text.call_args.args[0]
     assert "ENCENDIDO" in text
     assert "60" in text
+
+
+def test_cmd_pause_disables_bot():
+    secrets = make_secrets()
+    update = make_update(chat_id=AUTHORIZED_CHAT_ID)
+    context = make_context(secrets=secrets)
+
+    with patch("autotrading.telegram_bot.set_bot_enabled") as mock_set:
+        asyncio.run(cmd_pause(update, context))
+
+    mock_set.assert_called_once_with(secrets, False)
+    text = update.message.reply_text.call_args.args[0]
+    assert "PAUSADO" in text
+
+
+def test_cmd_pause_ignores_unauthorized_chat():
+    secrets = make_secrets()
+    update = make_update(chat_id=999)
+    context = make_context(secrets=secrets)
+
+    with patch("autotrading.telegram_bot.set_bot_enabled") as mock_set:
+        asyncio.run(cmd_pause(update, context))
+
+    mock_set.assert_not_called()
+    update.message.reply_text.assert_not_called()
+
+
+def test_cmd_resume_enables_bot():
+    secrets = make_secrets()
+    update = make_update(chat_id=AUTHORIZED_CHAT_ID)
+    context = make_context(secrets=secrets)
+
+    with patch("autotrading.telegram_bot.set_bot_enabled") as mock_set:
+        asyncio.run(cmd_resume(update, context))
+
+    mock_set.assert_called_once_with(secrets, True)
+    text = update.message.reply_text.call_args.args[0]
+    assert "REANUDADO" in text
 
 
 def make_config(all_symbols=("BTC/USDT",), leverage=4, position_size_pct=0.04):
@@ -362,7 +402,7 @@ def test_cmd_close_with_symbol_arg_shows_confirmation_directly():
 
     text = update.message.reply_text.call_args.args[0]
     markup = update.message.reply_text.call_args.kwargs["reply_markup"]
-    assert "BTC" in text and "largo" in text
+    assert "BTC" in text and "buy" in text
     assert markup.inline_keyboard[0][0].callback_data == "close_confirm:BTC/USDT"
 
 
