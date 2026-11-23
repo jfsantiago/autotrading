@@ -1,8 +1,13 @@
 from autotrading.engine.portfolio import Trade
-from autotrading.reporting.metrics import compute_metrics, max_drawdown_pct, per_symbol_metrics
+from autotrading.reporting.metrics import (
+    compute_metrics,
+    max_drawdown_pct,
+    per_side_metrics,
+    per_symbol_metrics,
+)
 
 
-def make_trade(symbol="BTC/USDT", pnl=0.0):
+def make_trade(symbol="BTC/USDT", pnl=0.0, side="long"):
     return Trade(
         symbol=symbol,
         entry_time=0,
@@ -10,6 +15,7 @@ def make_trade(symbol="BTC/USDT", pnl=0.0):
         entry_price=100.0,
         exit_price=100.0 + pnl,
         quantity=1.0,
+        side=side,
         exit_reason="signal",
         pnl=pnl,
         return_pct=pnl / 100.0,
@@ -50,3 +56,17 @@ def test_per_symbol_metrics_groups_correctly():
     assert by_symbol["BTC/USDT"].win_rate == 50.0
     assert by_symbol["ETH/USDT"].trade_count == 1
     assert by_symbol["ETH/USDT"].total_pnl == 5.0
+
+
+def test_per_side_metrics_groups_correctly():
+    trades = [
+        make_trade(side="long", pnl=10.0),
+        make_trade(side="long", pnl=-10.0),
+        make_trade(side="short", pnl=5.0),
+    ]
+    by_side = per_side_metrics(trades)
+
+    assert by_side["long"].trade_count == 2
+    assert by_side["long"].win_rate == 50.0
+    assert by_side["short"].trade_count == 1
+    assert by_side["short"].total_pnl == 5.0

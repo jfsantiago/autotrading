@@ -13,9 +13,17 @@ class VolatileBreakoutStrategy(Strategy):
 
     BUY when price has risen by at least pct_change_threshold over
     pct_change_window bars AND volume is spiking (z-score >= volume_spike_zscore).
-    SELL when the momentum that triggered entry fades (pct change over the
-    same window turns non-positive) — treated as the exit signal regardless
-    of the volume condition.
+    SELL when price has FALLEN by at least pct_change_threshold over the
+    same window AND volume is spiking too — the exact mirror of BUY.
+
+    SELL used to be just `pct_change <= 0` ("momentum isn't positive
+    anymore"), with no volume requirement — reasonable as a loose long-exit
+    heuristic, but since decide_trade_action (live) and run_backtest both
+    open a SHORT on SELL-while-flat, that loose condition was firing far
+    more often than BUY's much stricter one. Confirmed via backtest: the
+    short side ended up with ~6x the trade count of the long side and the
+    bulk of total losses, simply because "not currently pumping" is true
+    most of the time and was never a real bearish-breakout confirmation.
     """
 
     def generate_signals(self, df: pd.DataFrame, params: dict[str, Any]) -> pd.Series:
@@ -25,7 +33,9 @@ class VolatileBreakoutStrategy(Strategy):
         buy = (pct_change >= params["pct_change_threshold"]) & (
             vol_z >= params["volume_spike_zscore"]
         )
-        sell = pct_change <= 0
+        sell = (pct_change <= -params["pct_change_threshold"]) & (
+            vol_z >= params["volume_spike_zscore"]
+        )
 
         signals = pd.Series(Signal.HOLD, index=df.index, dtype=object)
         signals[buy] = Signal.BUY

@@ -66,3 +66,27 @@ def per_symbol_metrics(trades: list[Trade]) -> dict[str, Metrics]:
             total_pnl=sum(t.pnl for t in symbol_trades),
         )
     return result
+
+
+def per_side_metrics(trades: list[Trade]) -> dict[str, Metrics]:
+    """Long vs. short breakdown — without this there's no way to tell
+    whether the short side of a strategy is helping or hurting overall
+    performance, since compute_metrics/per_symbol_metrics only ever mix
+    both sides together.
+    """
+    by_side: dict[str, list[Trade]] = {}
+    for trade in trades:
+        by_side.setdefault(trade.side, []).append(trade)
+
+    result = {}
+    for side, side_trades in by_side.items():
+        wins = sum(1 for t in side_trades if t.pnl > 0)
+        count = len(side_trades)
+        result[side] = Metrics(
+            trade_count=count,
+            win_rate=(wins / count * 100) if count else 0.0,
+            total_return_pct=0.0,
+            max_drawdown_pct=0.0,
+            total_pnl=sum(t.pnl for t in side_trades),
+        )
+    return result

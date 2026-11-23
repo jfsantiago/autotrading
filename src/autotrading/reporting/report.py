@@ -5,11 +5,19 @@ from pathlib import Path
 import pandas as pd
 
 from autotrading.engine.portfolio import Portfolio
-from autotrading.reporting.metrics import Metrics, compute_metrics, per_symbol_metrics
+from autotrading.reporting.metrics import (
+    Metrics,
+    compute_metrics,
+    per_side_metrics,
+    per_symbol_metrics,
+)
 
 
 def print_summary(
-    aggregate: Metrics, by_symbol: dict[str, Metrics], initial_capital: float
+    aggregate: Metrics,
+    by_symbol: dict[str, Metrics],
+    initial_capital: float,
+    by_side: dict[str, Metrics] | None = None,
 ) -> None:
     print("=== Backtest summary ===")
     print(f"Initial capital: {initial_capital:.2f}")
@@ -18,6 +26,14 @@ def print_summary(
     print(f"Total return: {aggregate.total_return_pct:.2f}%")
     print(f"Max drawdown: {aggregate.max_drawdown_pct:.2f}%")
     print(f"Total PnL: {aggregate.total_pnl:.2f}")
+    if by_side:
+        print()
+        print("--- Long vs short ---")
+        for side, metrics in by_side.items():
+            print(
+                f"{side}: trades={metrics.trade_count} "
+                f"win_rate={metrics.win_rate:.2f}% pnl={metrics.total_pnl:.2f}"
+            )
     print()
     print("--- Per symbol ---")
     for symbol, metrics in by_symbol.items():
@@ -39,6 +55,7 @@ def save_results(portfolio: Portfolio, output_dir: Path) -> None:
                 "entry_price": t.entry_price,
                 "exit_price": t.exit_price,
                 "quantity": t.quantity,
+                "side": t.side,
                 "exit_reason": t.exit_reason,
                 "pnl": t.pnl,
                 "return_pct": t.return_pct,
@@ -55,8 +72,9 @@ def save_results(portfolio: Portfolio, output_dir: Path) -> None:
 def report(portfolio: Portfolio, initial_capital: float, output_dir: Path, save_csv: bool) -> None:
     aggregate = compute_metrics(portfolio.closed_trades, portfolio.equity_curve, initial_capital)
     by_symbol = per_symbol_metrics(portfolio.closed_trades)
+    by_side = per_side_metrics(portfolio.closed_trades)
 
-    print_summary(aggregate, by_symbol, initial_capital)
+    print_summary(aggregate, by_symbol, initial_capital, by_side)
 
     if save_csv:
         save_results(portfolio, output_dir)

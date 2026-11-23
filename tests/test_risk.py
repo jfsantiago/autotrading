@@ -33,6 +33,21 @@ def test_stop_loss_and_take_profit_prices():
     assert risk.take_profit_price(entry_price, r) == pytest.approx(110.0)
 
 
+def test_stop_loss_and_take_profit_prices_mirrored_for_short():
+    r = make_risk(stop_loss_pct=0.05, take_profit_pct=0.10)
+    entry_price = 100.0
+    assert risk.stop_loss_price(entry_price, r, side="short") == pytest.approx(105.0)
+    assert risk.take_profit_price(entry_price, r, side="short") == pytest.approx(90.0)
+
+
+def test_position_quantity_applies_leverage():
+    r = make_risk(position_size_pct=0.10)
+    equity = 1000.0
+    # margin = 100; at 4x leverage, notional = 400, quantity = 400/50 = 8
+    quantity = risk.position_quantity(equity, entry_price=50.0, risk=r, leverage=4)
+    assert quantity == 8.0
+
+
 def test_fees():
     r = make_risk(fee_pct=0.001)
     assert risk.entry_fee(1000.0, r) == 1.0

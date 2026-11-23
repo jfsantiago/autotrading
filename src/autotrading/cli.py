@@ -146,7 +146,9 @@ def run_backtest_command(args: argparse.Namespace) -> int:
         params = config.strategy_params[strategy_name]
         signals[symbol] = strategy.generate_signals(df, params)
 
-    portfolio = run_backtest(symbol_data, signals, config.initial_capital, config.risk)
+    portfolio = run_backtest(
+        symbol_data, signals, config.initial_capital, config.risk, config.futures.leverage
+    )
     report(portfolio, config.initial_capital, output_dir, config.output.save_csv)
 
     return 0
