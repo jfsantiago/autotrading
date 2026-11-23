@@ -139,7 +139,8 @@ def test_cmd_history_shows_recent_trades():
     text = update.message.reply_text.call_args.args[0]
     assert "BTC" in text  # base ticker only, "/USDT" dropped for table width
     assert "10.0" in text or "+10.0000" in text
-    assert "0101-1200" in text  # no-space date format ("ddmm-HHMM")
+    assert "20260101:1200" in text  # date format "YYYYMMDD:HHMM"
+    assert "largo" in text  # "long" translated for display
 
 
 def test_cmd_history_handles_no_trades():

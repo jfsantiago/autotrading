@@ -91,6 +91,15 @@ def _fmt_num(value: float) -> str:
     return text or "0"
 
 
+_SIDE_LABELS = {"long": "largo", "short": "corto"}
+
+
+def _fmt_side(side: str) -> str:
+    """long/short (the stored values, in English) -> largo/corto for
+    display — "short"/"long" aren't self-explanatory to a non-trader."""
+    return _SIDE_LABELS.get(side, side)
+
+
 async def cmd_positions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     secrets: Secrets = context.bot_data["secrets"]
     if not await _guarded(update, secrets):
@@ -113,7 +122,7 @@ async def cmd_positions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         pnl_str = f"{pnl:+.4f}" if pnl is not None else "?"
         base_symbol = p["symbol"].split("/")[0]
         rows.append(
-            f"{base_symbol:<8}{p['side']:<6}{_fmt_num(p['size']):>9}"
+            f"{base_symbol:<8}{_fmt_side(p['side']):<6}{_fmt_num(p['size']):>9}"
             f"{_fmt_num(p['entry_price']):>10}{pnl_str:>10}"
         )
     table = "\n".join(rows)
@@ -125,18 +134,18 @@ async def cmd_positions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 def _format_trades_table(trades: list) -> str:
     # Monospace table via <pre> — Telegram has no native table widget, but a
     # fixed-width font makes columns line up. Kept to the essential columns
-    # (entry/exit price dropped) and the date uses no internal space
-    # ("ddmm-HHMM") specifically because a space is where Telegram's
-    # renderer was wrapping the line on narrow phone screens — confirmed
-    # live, punctuation doesn't trigger the same wrap.
-    header = f"{'Symbol':<8}{'Lado':<6}{'Cant.':>9}{'PnL':>10}{'Fecha':>11}"
+    # (entry/exit price dropped). Date format "YYYYMMDD:HHMM" per explicit
+    # request — no internal space (a space was the earlier wrap point on
+    # narrow phone screens, confirmed live; ":" doesn't trigger the same).
+    header = f"{'Symbol':<8}{'Lado':<6}{'Cant.':>9}{'PnL':>10}{'Fecha':>14}"
     rows = [header, "-" * len(header)]
     for t in trades:
         pnl_str = f"{t.realized_pnl:+.4f}" if t.realized_pnl is not None else "?"
-        date_str = t.closed_at.strftime("%d%m-%H%M")
+        date_str = t.closed_at.strftime("%Y%m%d:%H%M")
         base_symbol = t.symbol.split("/")[0]
         rows.append(
-            f"{base_symbol:<8}{t.position_side:<6}{_fmt_num(t.quantity):>9}{pnl_str:>10}{date_str:>11}"
+            f"{base_symbol:<8}{_fmt_side(t.position_side):<6}"
+            f"{_fmt_num(t.quantity):>9}{pnl_str:>10}{date_str:>14}"
         )
     return "\n".join(rows)
 
