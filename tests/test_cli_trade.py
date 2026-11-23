@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from autotrading.cli import main
+from autotrading.cli import _notify_review_summary, main
 from autotrading.execution.orders import OrderResult
 from autotrading.execution.positions import PositionSide, PositionState
 from autotrading.news.pipeline import NewsSnapshot
@@ -78,13 +78,46 @@ def test_trade_with_confirm_opens_long(tmp_path):
         with patch("autotrading.cli.open_long", return_value=fake_result) as mock_open_long:
             with patch(
                 "autotrading.cli.make_futures_demo_client"
-            ) as mock_make_client:
+            ) as mock_make_client, patch("autotrading.cli.record_closed_trade") as mock_record:
                 mock_client = mock_make_client.return_value
                 mock_client.fetch_balance.return_value = {"USDT": {"total": 1000.0}}
                 exit_code = main(
                     ["trade", "--config", "fake.yaml", "--confirm", "--output", str(tmp_path)]
                 )
             mock_open_long.assert_called_once()
+            mock_record.assert_not_called()  # opens never record trade history
+
+    assert exit_code == 0
+
+
+def test_trade_with_confirm_closes_long_records_history(tmp_path):
+    patches = common_patches(tmp_path, flat_position=False)  # already LONG
+    fake_result = OrderResult(
+        symbol="BTC/USDT", action="close", entry_order={"id": "3"}, stop_order=None,
+        filled_quantity=1.0, filled_price=105.0, realized_pnl=5.0,
+    )
+    with patches[0], patches[1], patches[2], patches[3], patches[5], patches[6]:
+        with patch("autotrading.cli.get_latest_signal", return_value=(Signal.SELL, pd.DataFrame({"close": [105.0]}))):
+            with patch("autotrading.cli.close_position", return_value=fake_result) as mock_close:
+                with patch(
+                    "autotrading.cli.make_futures_demo_client"
+                ) as mock_make_client, patch("autotrading.cli.record_closed_trade") as mock_record:
+                    mock_make_client.return_value.fetch_balance.return_value = {
+                        "USDT": {"total": 1000.0}
+                    }
+                    exit_code = main(
+                        ["trade", "--config", "fake.yaml", "--confirm", "--output", str(tmp_path)]
+                    )
+                mock_close.assert_called_once()
+                mock_record.assert_called_once()
+                assert mock_record.call_args.kwargs == {
+                    "symbol": "BTC/USDT",
+                    "position_side": "long",
+                    "quantity": 1.0,
+                    "entry_price": 100.0,
+                    "exit_price": 105.0,
+                    "realized_pnl": 5.0,
+                }
 
     assert exit_code == 0
 
@@ -111,3 +144,24 @@ def test_trade_errors_without_news_config():
     with patch("autotrading.cli.load_config", return_value=fake_config):
         exit_code = main(["trade", "--config", "fake.yaml"])
     assert exit_code == 1
+
+
+def test_notify_review_summary_reports_no_action_when_empty():
+    with patch("autotrading.cli.notify_telegram") as mock_notify:
+        _notify_review_summary(make_fake_secrets(), {}, [])
+    mock_notify.assert_called_once()
+    assert "sin operaciones nuevas" in mock_notify.call_args.args[1]
+
+
+def test_notify_review_summary_reports_executed_and_failed():
+    result = OrderResult(
+        symbol="BTC/USDT", action="close", entry_order={"id": "1"}, stop_order=None,
+        filled_quantity=1.0, filled_price=105.0, realized_pnl=5.0,
+    )
+    with patch("autotrading.cli.notify_telegram") as mock_notify:
+        _notify_review_summary(
+            make_fake_secrets(), {"BTC/USDT": result}, [("ETH/USDT", "insufficient margin")]
+        )
+    text = mock_notify.call_args.args[1]
+    assert "BTC/USDT" in text and "PnL +5.0000" in text
+    assert "ETH/USDT" in text and "FALLÓ" in text

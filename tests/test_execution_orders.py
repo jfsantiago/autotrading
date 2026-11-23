@@ -1,8 +1,9 @@
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
 from autotrading.execution.orders import (
+    _fetch_realized_pnl,
     close_position,
     open_long,
     open_short,
@@ -70,8 +71,11 @@ def test_other_margin_mode_error_propagates():
 def test_close_position_sends_reduce_only_opposite_side_and_cancels_orders():
     client = MagicMock()
     client.create_order = MagicMock(return_value={"id": "close-1", "average": None})
-    client.fetch_order = MagicMock(return_value={"id": "close-1", "average": 50100.0})
+    client.fetch_order = MagicMock(
+        return_value={"id": "close-1", "average": 50100.0, "timestamp": 1_700_000_000_000}
+    )
     client.amount_to_precision = MagicMock(side_effect=lambda symbol, amount: amount)
+    client.fapiPrivateGetIncome = MagicMock(return_value=[{"income": "12.5"}])
 
     position = PositionState(symbol="BTC/USDT", side=PositionSide.LONG, size=1.5, entry_price=50000.0)
     result = close_position(client, "BTC/USDT", position)
@@ -86,13 +90,17 @@ def test_close_position_sends_reduce_only_opposite_side_and_cancels_orders():
     ]
     assert result.action == "close"
     assert result.filled_price == 50100.0
+    assert result.realized_pnl == pytest.approx(12.5)
 
 
 def test_close_short_position_sends_buy_side():
     client = MagicMock()
     client.create_order = MagicMock(return_value={"id": "close-2", "average": None})
-    client.fetch_order = MagicMock(return_value={"id": "close-2", "average": 2950.0})
+    client.fetch_order = MagicMock(
+        return_value={"id": "close-2", "average": 2950.0, "timestamp": 1_700_000_000_000}
+    )
     client.amount_to_precision = MagicMock(side_effect=lambda symbol, amount: amount)
+    client.fapiPrivateGetIncome = MagicMock(return_value=[])
 
     position = PositionState(symbol="ETH/USDT", side=PositionSide.SHORT, size=2.0, entry_price=3000.0)
     close_position(client, "ETH/USDT", position)
@@ -107,3 +115,44 @@ def test_prepare_symbol_for_trading_rejects_unsafe_leverage():
     with pytest.raises(ValueError):
         prepare_symbol_for_trading(client, "BTC/USDT:USDT", leverage=50)
     client.set_margin_mode.assert_not_called()
+
+
+def test_fetch_realized_pnl_sums_multiple_entries():
+    client = MagicMock()
+    client.market_id = MagicMock(return_value="BTCUSDT")
+    client.fapiPrivateGetIncome = MagicMock(
+        return_value=[{"income": "12.5"}, {"income": "-0.3"}]
+    )
+
+    result = _fetch_realized_pnl(client, "BTC/USDT:USDT", since_ms=1_700_000_000_000)
+
+    assert result == pytest.approx(12.2)
+    client.market_id.assert_called_once_with("BTC/USDT:USDT")
+    client.fapiPrivateGetIncome.assert_called_once_with(
+        {
+            "symbol": "BTCUSDT",
+            "incomeType": "REALIZED_PNL",
+            "startTime": 1_700_000_000_000,
+            "limit": 20,
+        }
+    )
+
+
+def test_fetch_realized_pnl_retries_once_then_returns_none(monkeypatch):
+    monkeypatch.setattr("autotrading.execution.orders.time.sleep", lambda _: None)
+    client = MagicMock()
+    client.fapiPrivateGetIncome = MagicMock(return_value=[])
+
+    result = _fetch_realized_pnl(client, "BTC/USDT:USDT", since_ms=1_700_000_000_000)
+
+    assert result is None
+    assert client.fapiPrivateGetIncome.call_count == 2
+
+
+def test_fetch_realized_pnl_returns_none_on_exception():
+    client = MagicMock()
+    client.fapiPrivateGetIncome = MagicMock(side_effect=Exception("boom"))
+
+    result = _fetch_realized_pnl(client, "BTC/USDT:USDT", since_ms=1_700_000_000_000)
+
+    assert result is None

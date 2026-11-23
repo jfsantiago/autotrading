@@ -6,3 +6,4 @@ feedparser
 requests
 openai
 psycopg2-binary
+python-telegram-bot

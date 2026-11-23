@@ -1,0 +1,10 @@
+[Unit]
+Description=AutoTrading scheduled-run heartbeat (kill-switch + due-check wrapper)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/autotrading
+ExecStart=/opt/autotrading/.venv/bin/autotrading scheduled-run --config /opt/autotrading/configs/default.yaml
+User=root

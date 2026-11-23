@@ -14,6 +14,8 @@ class Secrets:
     coinmarketcal_api_key: str | None
     binance_demo_api_key: str | None = None
     binance_demo_api_secret: str | None = None
+    telegram_bot_token: str | None = None
+    telegram_chat_id: int | None = None
 
 
 def load_secrets() -> Secrets:
@@ -49,4 +51,10 @@ def load_secrets() -> Secrets:
         coinmarketcal_api_key=os.environ.get("COINMARKETCAL_API_KEY") or None,
         binance_demo_api_key=os.environ.get("BINANCE_DEMO_API_KEY") or None,
         binance_demo_api_secret=os.environ.get("BINANCE_DEMO_API_SECRET") or None,
+        telegram_bot_token=os.environ.get("TELEGRAM_BOT_TOKEN") or None,
+        telegram_chat_id=_parse_int(os.environ.get("TELEGRAM_CHAT_ID")),
     )
+
+
+def _parse_int(value: str | None) -> int | None:
+    return int(value) if value else None

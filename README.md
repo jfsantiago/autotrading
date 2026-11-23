@@ -21,6 +21,7 @@ autotrading decide --config configs/default.yaml
 autotrading trade --config configs/default.yaml              # preview, no coloca órdenes
 autotrading trade --config configs/default.yaml --confirm     # coloca órdenes reales en Demo Trading
 autotrading scheduled-run --config configs/default.yaml       # wrapper para cron/CI, respeta kill switch e intervalo
+autotrading telegram-bot --config configs/default.yaml        # bot de Telegram de solo lectura, corre para siempre
 pytest tests/ -v
 ```
 
@@ -48,4 +49,6 @@ El cache de clasificación LLM vive en una tabla Postgres (`llm_classification_c
 
 **Despliegue**: un timer de `systemd` (`autotrading-heartbeat.timer`) corre `autotrading scheduled-run` cada 5 minutos en el servidor; la mayoría de esas corridas se saltan gratis (dos consultas chicas a Supabase) y solo cuando toca de verdad se llama a Binance/OpenAI/RSS. Código en `/opt/autotrading` en el servidor, actualizado vía `git pull` + reinstalar.
 
-**Pendiente**: observar las primeras corridas reales una vez se prenda `bot_state.bot_enabled`; más adelante, bot de Telegram como panel de administración, y — como decisión aparte, no automática — el camino hacia capital real.
+**Fase 6 completa**: captura de PnL al cerrar + bot de Telegram de solo lectura (`autotrading telegram-bot`). `execution/orders.py::close_position()` ahora consulta el historial de ingresos de Binance (`REALIZED_PNL`) justo después de cada cierre y guarda el resultado en una tabla nueva de Supabase (`closed_trades`) — validado en vivo cerrando posiciones reales y comparando contra el cálculo manual. El bot de Telegram (`python-telegram-bot`, solo lectura) expone `/positions` (abiertas, con PnL no realizado), `/history` (últimos cierres, en tabla monoespaciada) y `/status` (encendido/apagado, intervalo) — con doble capa de control de acceso (solo responde a un chat_id autorizado, en silencio para cualquier otro). Después de cada revisión real del heartbeat (haya abierto/cerrado algo o no) llega una notificación a Telegram con el resumen — configurado así a propósito, para confirmar que el bot sigue vivo y revisando. Usa el menú nativo de comandos de Telegram (botón único que despliega la lista) en vez de un teclado de varios botones.
+
+**Pendiente**: control desde Telegram (pausar/reanudar, cambiar intervalo/apalancamiento/tamaño de posición) — la tabla `bot_state` y las variables `AUTOTRADING_*` ya están pensadas para esto; y — como decisión aparte, no automática — el camino hacia capital real.

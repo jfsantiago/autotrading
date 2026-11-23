@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -7,8 +9,11 @@ from autotrading.config import RiskParameters
 from autotrading.execution.client import assert_leverage_safe, to_futures_symbol
 from autotrading.execution.positions import PositionSide, PositionState, get_position_state
 
+logger = logging.getLogger(__name__)
+
 MARGIN_MODE = "isolated"  # hardcoded safety invariant, not a config value
 NO_MARGIN_CHANGE_NEEDED_CODE = "-4046"
+REALIZED_PNL_RETRY_DELAY_SECONDS = 1.5
 
 
 @dataclass
@@ -19,6 +24,7 @@ class OrderResult:
     stop_order: dict[str, Any] | None
     filled_quantity: float
     filled_price: float | None
+    realized_pnl: float | None = None  # only populated for 'close'
 
 
 def calculate_position_size(
@@ -111,6 +117,42 @@ def open_short(
     )
 
 
+def _fetch_realized_pnl(client: Any, futures_symbol: str, since_ms: int) -> float | None:
+    """Binance's own booked realized PnL for this close (already nets out
+    fees as Binance accounts for them) — more trustworthy than computing
+    (exit - entry) * qty ourselves. One immediate query + one short retry:
+    Binance books this essentially synchronously for market fills, so a
+    full backoff loop would be over-engineering for what should be fast.
+    """
+    # fapiPrivateGetIncome is a raw/implicit API method — unlike unified
+    # methods (create_order, fetch_positions), it does NOT translate the
+    # unified symbol to Binance's raw market id itself. Confirmed live:
+    # passing "WIF/USDT:USDT" directly raised "Invalid symbol" (-1121);
+    # client.market_id() gives the "WIFUSDT" form this endpoint needs.
+    raw_symbol = client.market_id(futures_symbol)
+
+    for attempt in range(2):
+        try:
+            entries = client.fapiPrivateGetIncome(
+                {
+                    "symbol": raw_symbol,
+                    "incomeType": "REALIZED_PNL",
+                    "startTime": since_ms,
+                    "limit": 20,
+                }
+            )
+        except Exception:
+            logger.warning("failed to fetch realized PnL for %s", futures_symbol, exc_info=True)
+            return None
+
+        if entries:
+            return sum(float(e["income"]) for e in entries)
+        if attempt == 0:
+            time.sleep(REALIZED_PNL_RETRY_DELAY_SECONDS)
+
+    return None
+
+
 def close_position(
     client: Any, symbol: str, position: PositionState, quote_currency: str = "USDT"
 ) -> OrderResult:
@@ -138,6 +180,12 @@ def close_position(
     client.cancel_all_orders(futures_symbol)
     client.cancel_all_orders(futures_symbol, {"trigger": True})
 
+    # A PnL-lookup hiccup must never make an already-successful close look
+    # like a failure to the caller — realized_pnl simply stays None (honest
+    # "unknown" rather than a misleading 0.0 that looks like break-even).
+    since_ms = int(filled_order.get("timestamp") or 0) - 5000
+    realized_pnl = _fetch_realized_pnl(client, futures_symbol, since_ms)
+
     return OrderResult(
         symbol=symbol,
         action="close",
@@ -145,4 +193,5 @@ def close_position(
         stop_order=None,
         filled_quantity=position.size,
         filled_price=filled_order.get("average"),
+        realized_pnl=realized_pnl,
     )

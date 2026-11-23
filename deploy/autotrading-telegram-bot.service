@@ -1,0 +1,15 @@
+[Unit]
+Description=AutoTrading Telegram control bot (read-only reporting)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/autotrading
+ExecStart=/opt/autotrading/.venv/bin/autotrading telegram-bot --config /opt/autotrading/configs/default.yaml
+User=root
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

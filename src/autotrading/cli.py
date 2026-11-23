@@ -29,6 +29,10 @@ from autotrading.reporting.report import report
 from autotrading.scheduling import ensure_bot_state_row, fetch_bot_state, is_due, mark_run_completed
 from autotrading.secrets import load_secrets
 from autotrading.strategies import STRATEGY_REGISTRY
+from autotrading.telegram_bot import notify as notify_telegram
+from autotrading.telegram_bot import require_telegram_secrets
+from autotrading.telegram_bot import run as run_telegram_bot
+from autotrading.trade_history import record_closed_trade
 from autotrading.utils.timeutils import parse_date_to_ms
 
 logger = logging.getLogger(__name__)
@@ -78,6 +82,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Force a preview-only trade run now, bypassing the kill switch and due-check "
         "(doesn't touch bot_state) — for verifying the pipeline from CI without risk",
     )
+
+    telegram_parser = subparsers.add_parser(
+        "telegram-bot",
+        help="Run the read-only Telegram reporting bot (never returns, runs forever)",
+    )
+    telegram_parser.add_argument("--config", required=True, help="Path to a YAML config file")
 
     return parser
 
@@ -207,6 +217,30 @@ def run_decide_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _notify_review_summary(
+    secrets, executed_results: dict[str, object], failed_symbols: list[tuple[str, str]]
+) -> None:
+    """Best-effort Telegram notification after a confirmed trade cycle —
+    "did the system's review open/close anything?" No-op if Telegram isn't
+    configured (notify() itself handles that); never raises.
+    """
+    lines = []
+    for symbol, result in executed_results.items():
+        if result.action == "close":
+            pnl = result.realized_pnl
+            pnl_str = f"{pnl:+.4f}" if pnl is not None else "?"
+            lines.append(f"{symbol}: CLOSE @ {result.filled_price} (PnL {pnl_str})")
+        else:
+            lines.append(f"{symbol}: {result.action.upper()} @ {result.filled_price}")
+    for symbol, error in failed_symbols:
+        lines.append(f"{symbol}: FALLÓ ({error})")
+
+    if lines:
+        notify_telegram(secrets, "Revisión del bot:\n" + "\n".join(lines))
+    else:
+        notify_telegram(secrets, "Revisión del bot: sin operaciones nuevas.")
+
+
 def run_trade_command(args: argparse.Namespace) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
@@ -258,6 +292,7 @@ def run_trade_command(args: argparse.Namespace) -> int:
     print_trade_preview(decisions, snapshot.symbol_sentiments)
 
     executed_results = {}
+    failed_symbols: list[tuple[str, str]] = []
     if args.confirm:
         balance = futures_client.fetch_balance()
         equity = float(balance.get(config.futures.quote_currency, {}).get("total") or 0.0)
@@ -293,11 +328,28 @@ def run_trade_command(args: argparse.Namespace) -> int:
                     )
             except Exception as exc:
                 print(f"ORDER FAILED — {decision.symbol}: {exc}")
+                failed_symbols.append((decision.symbol, str(exc)))
                 continue
 
             executed_results[decision.symbol] = result
             print_order_executed(decision, result)
 
+            if decision.order_action in (OrderAction.CLOSE_LONG, OrderAction.CLOSE_SHORT):
+                closed_position = positions_by_symbol[decision.symbol]
+                try:
+                    record_closed_trade(
+                        secrets,
+                        symbol=decision.symbol,
+                        position_side=closed_position.side.value,
+                        quantity=closed_position.size,
+                        entry_price=closed_position.entry_price,
+                        exit_price=result.filled_price,
+                        realized_pnl=result.realized_pnl,
+                    )
+                except Exception as exc:
+                    print(f"WARNING: failed to record trade history for {decision.symbol}: {exc}")
+
+        _notify_review_summary(secrets, executed_results, failed_symbols)
         print_confirm_footer()
 
     output_dir = Path(args.output or "results/trade")
@@ -342,6 +394,22 @@ def run_scheduled_command(args: argparse.Namespace) -> int:
     return exit_code
 
 
+def run_telegram_bot_command(args: argparse.Namespace) -> int:
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+
+    config: AppConfig = load_config(args.config)
+    try:
+        secrets = load_secrets()
+        require_telegram_secrets(secrets)
+    except RuntimeError as exc:
+        print(f"Error: {exc}")
+        return 1
+
+    futures_client = make_futures_demo_client(secrets)
+    run_telegram_bot(config, secrets, futures_client)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_arg_parser()
     args = parser.parse_args(argv)
@@ -356,6 +424,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_trade_command(args)
     if args.command == "scheduled-run":
         return run_scheduled_command(args)
+    if args.command == "telegram-bot":
+        return run_telegram_bot_command(args)
 
     parser.print_help()
     return 1

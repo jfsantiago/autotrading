@@ -15,6 +15,7 @@ dependencies = [
     "requests",
     "openai",
     "psycopg2-binary",
+    "python-telegram-bot",
 ]
 
 [project.scripts]
