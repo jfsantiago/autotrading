@@ -87,8 +87,8 @@ def run_backtest(
                     notional = entry_price * quantity
                     fee = risk_calc.entry_fee(notional, risk)
                     if margin + fee <= portfolio.cash:
-                        stop_loss = risk_calc.stop_loss_price(entry_price, risk, side)
-                        take_profit = risk_calc.take_profit_price(entry_price, risk, side)
+                        stop_loss = risk_calc.stop_loss_price(entry_price, risk, side, leverage)
+                        take_profit = risk_calc.take_profit_price(entry_price, risk, side, leverage)
                         portfolio.open_position(
                             symbol, ts, entry_price, quantity, side, margin,
                             stop_loss, take_profit, fee,

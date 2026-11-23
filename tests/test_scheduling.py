@@ -10,6 +10,7 @@ from autotrading.scheduling import (
     set_bot_enabled,
     set_leverage,
     set_position_size_pct,
+    set_take_profit_margin_pct,
 )
 from autotrading.secrets import Secrets
 
@@ -69,7 +70,7 @@ def test_ensure_bot_state_row_issues_insert_on_conflict_do_nothing():
 def test_fetch_bot_state_parses_row():
     cursor = MagicMock()
     last_run = datetime.now(timezone.utc)
-    cursor.fetchone.return_value = (True, 45, last_run, 7, 0.1)
+    cursor.fetchone.return_value = (True, 45, last_run, 7, 0.1, 0.2)
     conn = make_mock_conn(cursor)
 
     with patch("autotrading.scheduling.psycopg2.connect", return_value=conn):
@@ -80,11 +81,12 @@ def test_fetch_bot_state_parses_row():
     assert state.last_run_at == last_run
     assert state.leverage == 7
     assert state.position_size_pct == 0.1
+    assert state.take_profit_margin_pct == 0.2
 
 
 def test_fetch_bot_state_leverage_and_risk_default_to_none():
     cursor = MagicMock()
-    cursor.fetchone.return_value = (True, 60, None, None, None)
+    cursor.fetchone.return_value = (True, 60, None, None, None, None)
     conn = make_mock_conn(cursor)
 
     with patch("autotrading.scheduling.psycopg2.connect", return_value=conn):
@@ -92,6 +94,7 @@ def test_fetch_bot_state_leverage_and_risk_default_to_none():
 
     assert state.leverage is None
     assert state.position_size_pct is None
+    assert state.take_profit_margin_pct is None
 
 
 def test_mark_run_completed_updates_last_run_at():
@@ -142,6 +145,19 @@ def test_set_position_size_pct_updates_column():
     query, params = cursor.execute.call_args.args
     assert "UPDATE bot_state" in query and "position_size_pct" in query
     assert params == (0.1, 1)
+    conn.commit.assert_called_once()
+
+
+def test_set_take_profit_margin_pct_updates_column():
+    cursor = MagicMock()
+    conn = make_mock_conn(cursor)
+
+    with patch("autotrading.scheduling.psycopg2.connect", return_value=conn):
+        set_take_profit_margin_pct(make_secrets(), 0.2)
+
+    query, params = cursor.execute.call_args.args
+    assert "UPDATE bot_state" in query and "take_profit_margin_pct" in query
+    assert params == (0.2, 1)
     conn.commit.assert_called_once()
 
 

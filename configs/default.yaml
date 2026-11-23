@@ -28,8 +28,13 @@ strategy_params:
 
 risk:
   position_size_pct: 0.04
-  stop_loss_pct: 0.03
-  take_profit_pct: 0.06
+  # Fraction of the real USDT margin at risk, not of price movement — the
+  # actual price distance is this divided by leverage (so it stays a fixed
+  # 24% margin gain regardless of leverage chosen). stop-loss is always
+  # half of this (12% margin), auto-derived, never set independently.
+  # 0.24 reproduces today's 6%-price-move take-profit at the 4x default
+  # leverage below, so this starting value doesn't change current behavior.
+  take_profit_margin_pct: 0.24
   max_concurrent_positions: 5
   fee_pct: 0.001
 

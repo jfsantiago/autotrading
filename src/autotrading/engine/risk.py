@@ -28,16 +28,27 @@ def position_quantity(
     return notional / entry_price
 
 
-def stop_loss_price(entry_price: float, risk: RiskParameters, side: str = "long") -> float:
+def stop_loss_price(
+    entry_price: float, risk: RiskParameters, side: str = "long", leverage: int = 1
+) -> float:
+    """risk.stop_loss_margin_pct is a fraction of margin, not of price — the
+    price needs to move only margin_pct/leverage to lose that fraction of
+    the capital actually at risk. `leverage` defaults to 1, same backward-
+    compatibility reasoning as position_quantity.
+    """
+    price_move_pct = risk.stop_loss_margin_pct / leverage
     if side == "long":
-        return entry_price * (1 - risk.stop_loss_pct)
-    return entry_price * (1 + risk.stop_loss_pct)
+        return entry_price * (1 - price_move_pct)
+    return entry_price * (1 + price_move_pct)
 
 
-def take_profit_price(entry_price: float, risk: RiskParameters, side: str = "long") -> float:
+def take_profit_price(
+    entry_price: float, risk: RiskParameters, side: str = "long", leverage: int = 1
+) -> float:
+    price_move_pct = risk.take_profit_margin_pct / leverage
     if side == "long":
-        return entry_price * (1 + risk.take_profit_pct)
-    return entry_price * (1 - risk.take_profit_pct)
+        return entry_price * (1 + price_move_pct)
+    return entry_price * (1 - price_move_pct)
 
 
 def entry_fee(notional: float, risk: RiskParameters) -> float:

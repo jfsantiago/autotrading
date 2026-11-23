@@ -15,7 +15,12 @@ from telegram.ext import (
 )
 
 from autotrading import position_tracking, trade_history
-from autotrading.config import AppConfig, assert_position_size_safe
+from autotrading.config import (
+    TAKE_PROFIT_TO_STOP_LOSS_RATIO,
+    AppConfig,
+    assert_position_size_safe,
+    assert_take_profit_margin_safe,
+)
 from autotrading.execution.client import assert_leverage_safe, to_futures_symbol
 from autotrading.execution.orders import close_position
 from autotrading.execution.positions import PositionSide, PositionState, get_position_state
@@ -24,6 +29,7 @@ from autotrading.scheduling import (
     set_bot_enabled,
     set_leverage,
     set_position_size_pct,
+    set_take_profit_margin_pct,
 )
 from autotrading.secrets import Secrets
 
@@ -98,7 +104,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/resume — reanudar el bot después de un /pause\n"
         "/settings — apalancamiento y tamaño de posición actuales\n"
         "/set_leverage — cambiar el apalancamiento\n"
-        "/set_risk — cambiar el tamaño de posición"
+        "/set_risk — cambiar el tamaño de posición\n"
+        "/set_take_profit — cambiar el take-profit (el stop-loss se ajusta junto)"
     )
 
 
@@ -444,7 +451,19 @@ async def cmd_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             "(valor del YAML, sin override)"
         )
 
-    await update.message.reply_text(f"{leverage_line}\n{risk_line}")
+    if state.take_profit_margin_pct is not None:
+        take_profit_pct = state.take_profit_margin_pct
+        source = "override activo"
+    else:
+        take_profit_pct = config.risk.take_profit_margin_pct
+        source = "valor del YAML, sin override"
+    stop_loss_pct = take_profit_pct / TAKE_PROFIT_TO_STOP_LOSS_RATIO
+    tp_line = (
+        f"Take-profit: {take_profit_pct * 100:.1f}% de margen real ({source})\n"
+        f"Stop-loss: {stop_loss_pct * 100:.1f}% de margen real (siempre la mitad del take-profit)"
+    )
+
+    await update.message.reply_text(f"{leverage_line}\n{risk_line}\n{tp_line}")
 
 
 async def cmd_set_leverage(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -507,6 +526,47 @@ async def cmd_set_risk(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     )
 
 
+async def cmd_set_take_profit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Sets take_profit_margin_pct — stop_loss_margin_pct always derives as
+    half of it (see RiskParameters.stop_loss_margin_pct), so there's no
+    separate command to set the stop-loss independently; it moves with this
+    one, keeping the validated 1:2 risk/reward ratio intact.
+    """
+    secrets: Secrets = context.bot_data["secrets"]
+    if not await _guarded(update, secrets):
+        return
+
+    if not context.args:
+        await update.message.reply_text(
+            "Uso: /set_take_profit <porcentaje de margen, ej. 24> o /set_take_profit default"
+        )
+        return
+
+    arg = context.args[0].lower()
+    if arg == "default":
+        set_take_profit_margin_pct(secrets, None)
+        await update.message.reply_text(
+            "Take-profit: override eliminado, vuelve a usar el YAML."
+        )
+        return
+
+    try:
+        value = float(arg) / 100
+        assert_take_profit_margin_safe(value)
+    except ValueError as exc:
+        await update.message.reply_text(f"Valor inválido: {exc}")
+        return
+
+    set_take_profit_margin_pct(secrets, value)
+    stop_loss_pct = value / TAKE_PROFIT_TO_STOP_LOSS_RATIO
+    await update.message.reply_text(
+        f"Take-profit actualizado a {value * 100:.1f}% de margen real.\n"
+        f"Stop-loss se ajustó junto, a {stop_loss_pct * 100:.1f}% (siempre la mitad), "
+        "para mantener la proporción 1:2.\n"
+        "Se aplicará a la próxima posición que se abra, no a una ya abierta."
+    )
+
+
 async def _set_command_menu(application: Application) -> None:
     """Populates Telegram's native "/" command menu — a single button next
     to the message box that expands into the full command list, instead of
@@ -525,6 +585,7 @@ async def _set_command_menu(application: Application) -> None:
             BotCommand("settings", "Apalancamiento y tamaño de posición"),
             BotCommand("set_leverage", "Cambiar el apalancamiento"),
             BotCommand("set_risk", "Cambiar el tamaño de posición"),
+            BotCommand("set_take_profit", "Cambiar el take-profit"),
             BotCommand("start", "Mostrar el menú de botones"),
         ]
     )
@@ -576,6 +637,9 @@ def run(config: AppConfig, secrets: Secrets, client: Any) -> None:
     application.add_handler(CommandHandler("settings", cmd_settings, filters=auth_filter))
     application.add_handler(CommandHandler("set_leverage", cmd_set_leverage, filters=auth_filter))
     application.add_handler(CommandHandler("set_risk", cmd_set_risk, filters=auth_filter))
+    application.add_handler(
+        CommandHandler("set_take_profit", cmd_set_take_profit, filters=auth_filter)
+    )
     application.add_handler(CallbackQueryHandler(on_close_callback, pattern=r"^close_"))
 
     logger.info("Telegram bot starting (long polling)")

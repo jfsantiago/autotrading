@@ -20,7 +20,7 @@ def make_fake_config():
         all_symbols=["BTC/USDT"],
         decision=SimpleNamespace(news_veto_threshold=-0.5, live_lookback_candles=300),
         futures=SimpleNamespace(leverage=4, quote_currency="USDT"),
-        risk=SimpleNamespace(position_size_pct=0.04, stop_loss_pct=0.03),
+        risk=SimpleNamespace(position_size_pct=0.04, take_profit_margin_pct=0.24),
         timeframe="1h",
         strategy_for_symbol=lambda s: "stable_trend",
         strategy_params={"stable_trend": {}},
@@ -155,7 +155,7 @@ def test_trade_applies_bot_state_leverage_and_risk_overrides(tmp_path):
     patches = common_patches(tmp_path, flat_position=True)
     override_state = BotState(
         bot_enabled=True, run_interval_minutes=60, last_run_at=None,
-        leverage=7, position_size_pct=0.1,
+        leverage=7, position_size_pct=0.1, take_profit_margin_pct=0.5,
     )
     with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6], \
          patches[7], patches[8], patches[9], patches[10]:
@@ -174,6 +174,7 @@ def test_trade_applies_bot_state_leverage_and_risk_overrides(tmp_path):
 
                 mock_open_long.assert_called_once()
                 assert mock_open_long.call_args.args[3] == 7  # leverage override applied
+                assert mock_open_long.call_args.args[4] == 0.5  # take_profit_margin_pct override
                 assert mock_calc_size.call_args.args[2] == 7
 
     assert mock_calc_size.call_args.args[3].position_size_pct == 0.1
@@ -183,6 +184,22 @@ def test_trade_rejects_unsafe_leverage_override_from_bot_state(tmp_path):
     patches = common_patches(tmp_path, flat_position=True)
     unsafe_state = BotState(
         bot_enabled=True, run_interval_minutes=60, last_run_at=None, leverage=50,
+    )
+    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6], \
+         patches[7], patches[8], patches[9], patches[10]:
+        with patch("autotrading.cli.fetch_bot_state", return_value=unsafe_state):
+            exit_code = main(
+                ["trade", "--config", "fake.yaml", "--confirm", "--output", str(tmp_path)]
+            )
+
+    assert exit_code == 1
+
+
+def test_trade_rejects_unsafe_take_profit_override_from_bot_state(tmp_path):
+    patches = common_patches(tmp_path, flat_position=True)
+    unsafe_state = BotState(
+        bot_enabled=True, run_interval_minutes=60, last_run_at=None,
+        take_profit_margin_pct=5.0,
     )
     with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6], \
          patches[7], patches[8], patches[9], patches[10]:

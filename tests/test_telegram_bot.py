@@ -19,6 +19,7 @@ from autotrading.telegram_bot import (
     cmd_positions,
     cmd_set_leverage,
     cmd_set_risk,
+    cmd_set_take_profit,
     cmd_settings,
     cmd_pause,
     cmd_resume,
@@ -332,11 +333,15 @@ def test_cmd_resume_enables_bot():
     assert "REANUDADO" in text
 
 
-def make_config(all_symbols=("BTC/USDT",), leverage=4, position_size_pct=0.04):
+def make_config(
+    all_symbols=("BTC/USDT",), leverage=4, position_size_pct=0.04, take_profit_margin_pct=0.24
+):
     return SimpleNamespace(
         all_symbols=list(all_symbols),
         futures=SimpleNamespace(quote_currency="USDT", leverage=leverage),
-        risk=SimpleNamespace(position_size_pct=position_size_pct),
+        risk=SimpleNamespace(
+            position_size_pct=position_size_pct, take_profit_margin_pct=take_profit_margin_pct
+        ),
     )
 
 
@@ -525,6 +530,8 @@ def test_cmd_settings_shows_yaml_defaults_when_no_override():
     text = update.message.reply_text.call_args.args[0]
     assert "4x" in text and "sin override" in text
     assert "4.0%" in text
+    assert "24.0%" in text  # take-profit, from YAML
+    assert "12.0%" in text  # stop-loss, always half of take-profit
 
 
 def test_cmd_settings_shows_active_override():
@@ -534,7 +541,7 @@ def test_cmd_settings_shows_active_override():
     context = make_context(secrets=secrets, config=config)
     state = BotState(
         bot_enabled=True, run_interval_minutes=60, last_run_at=None,
-        leverage=7, position_size_pct=0.1,
+        leverage=7, position_size_pct=0.1, take_profit_margin_pct=0.5,
     )
 
     with patch("autotrading.telegram_bot.fetch_bot_state", return_value=state):
@@ -543,6 +550,8 @@ def test_cmd_settings_shows_active_override():
     text = update.message.reply_text.call_args.args[0]
     assert "7x" in text and "override activo" in text
     assert "10.0%" in text
+    assert "50.0%" in text  # take-profit override
+    assert "25.0%" in text  # stop-loss, half of the overridden take-profit
 
 
 def test_cmd_set_leverage_valid_value():
@@ -605,6 +614,45 @@ def test_cmd_set_risk_rejects_unsafe_value():
     mock_set.assert_not_called()
     text = update.message.reply_text.call_args.args[0]
     assert "inválido" in text.lower()
+
+
+def test_cmd_set_take_profit_valid_value_shows_derived_stop_loss():
+    secrets = make_secrets()
+    update = make_update(chat_id=AUTHORIZED_CHAT_ID)
+    context = make_context(args=["20"], secrets=secrets)
+
+    with patch("autotrading.telegram_bot.set_take_profit_margin_pct") as mock_set:
+        asyncio.run(cmd_set_take_profit(update, context))
+
+    mock_set.assert_called_once()
+    assert mock_set.call_args.args[1] == pytest.approx(0.20)
+    text = update.message.reply_text.call_args.args[0]
+    assert "20.0%" in text
+    assert "10.0%" in text  # stop-loss, always half
+
+
+def test_cmd_set_take_profit_rejects_unsafe_value():
+    secrets = make_secrets()
+    update = make_update(chat_id=AUTHORIZED_CHAT_ID)
+    context = make_context(args=["500"], secrets=secrets)
+
+    with patch("autotrading.telegram_bot.set_take_profit_margin_pct") as mock_set:
+        asyncio.run(cmd_set_take_profit(update, context))
+
+    mock_set.assert_not_called()
+    text = update.message.reply_text.call_args.args[0]
+    assert "inválido" in text.lower()
+
+
+def test_cmd_set_take_profit_default_clears_override():
+    secrets = make_secrets()
+    update = make_update(chat_id=AUTHORIZED_CHAT_ID)
+    context = make_context(args=["default"], secrets=secrets)
+
+    with patch("autotrading.telegram_bot.set_take_profit_margin_pct") as mock_set:
+        asyncio.run(cmd_set_take_profit(update, context))
+
+    mock_set.assert_called_once_with(secrets, None)
 
 
 def test_notify_does_nothing_when_not_configured():

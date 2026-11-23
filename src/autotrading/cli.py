@@ -6,7 +6,12 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from autotrading.config import AppConfig, assert_position_size_safe, load_config
+from autotrading.config import (
+    AppConfig,
+    assert_position_size_safe,
+    assert_take_profit_margin_safe,
+    load_config,
+)
 from autotrading.data.cache import get_cached_ohlcv
 from autotrading.data.exchange import fetch_ohlcv_range, make_public_client
 from autotrading.decision.engine import OrderAction, decide, decide_trade_action
@@ -335,10 +340,13 @@ def run_trade_command(args: argparse.Namespace) -> int:
         config.futures.leverage = state.leverage
     if state.position_size_pct is not None:
         config.risk.position_size_pct = state.position_size_pct
+    if state.take_profit_margin_pct is not None:
+        config.risk.take_profit_margin_pct = state.take_profit_margin_pct
 
     try:
         assert_leverage_safe(config.futures.leverage)
         assert_position_size_safe(config.risk.position_size_pct)
+        assert_take_profit_margin_safe(config.risk.take_profit_margin_pct)
         futures_client = make_futures_demo_client(secrets)
     except (ValueError, RuntimeError) as exc:
         print(f"Error: {exc}")
@@ -399,7 +407,7 @@ def run_trade_command(args: argparse.Namespace) -> int:
                     )
                     result = open_long(
                         futures_client, decision.symbol, quantity, config.futures.leverage,
-                        config.risk.stop_loss_pct, config.futures.quote_currency,
+                        config.risk.take_profit_margin_pct, config.futures.quote_currency,
                     )
                 elif decision.order_action == OrderAction.OPEN_SHORT:
                     entry_price = candles_by_symbol[decision.symbol]["close"].iloc[-1]
@@ -408,7 +416,7 @@ def run_trade_command(args: argparse.Namespace) -> int:
                     )
                     result = open_short(
                         futures_client, decision.symbol, quantity, config.futures.leverage,
-                        config.risk.stop_loss_pct, config.futures.quote_currency,
+                        config.risk.take_profit_margin_pct, config.futures.quote_currency,
                     )
                 else:  # CLOSE_LONG or CLOSE_SHORT
                     result = close_position(

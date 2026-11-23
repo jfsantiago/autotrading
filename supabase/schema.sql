@@ -35,6 +35,11 @@ create table if not exists bot_state (
 alter table bot_state add column if not exists leverage int;
 alter table bot_state add column if not exists position_size_pct double precision;
 
+-- Fraction of real USDT margin (not price movement) — stop_loss_margin_pct
+-- is always derived as half of this, never stored/set independently, so
+-- the validated 1:2 risk/reward ratio can't drift via a Telegram command.
+alter table bot_state add column if not exists take_profit_margin_pct double precision;
+
 -- Closed-trade history — one row per position close, inserted at the
 -- orchestration layer (cli.py::run_trade_command, right after a
 -- CLOSE_LONG/CLOSE_SHORT order executes) — not inside execution/orders.py,

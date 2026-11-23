@@ -4,6 +4,7 @@ from autotrading.config import (
     ENV_LEVERAGE,
     ENV_POSITION_SIZE_PCT,
     assert_position_size_safe,
+    assert_take_profit_margin_safe,
     load_config,
 )
 
@@ -26,8 +27,7 @@ strategy_params:
   volatile_breakout: {pct_change_window: 5, pct_change_threshold: 0.05, volume_window: 20, volume_spike_zscore: 2.0}
 risk:
   position_size_pct: 0.04
-  stop_loss_pct: 0.03
-  take_profit_pct: 0.06
+  take_profit_margin_pct: 0.24
   max_concurrent_positions: 5
   fee_pct: 0.001
 output:
@@ -116,3 +116,14 @@ def test_assert_position_size_safe_accepts_in_range(value):
 def test_assert_position_size_safe_rejects_out_of_range(value):
     with pytest.raises(ValueError):
         assert_position_size_safe(value)
+
+
+@pytest.mark.parametrize("value", [0.01, 0.24, 1.0])
+def test_assert_take_profit_margin_safe_accepts_in_range(value):
+    assert_take_profit_margin_safe(value)  # should not raise
+
+
+@pytest.mark.parametrize("value", [0, -0.1, 1.01, 5.0])
+def test_assert_take_profit_margin_safe_rejects_out_of_range(value):
+    with pytest.raises(ValueError):
+        assert_take_profit_margin_safe(value)

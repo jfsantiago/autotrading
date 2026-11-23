@@ -23,6 +23,16 @@ ENV_LEVERAGE = "AUTOTRADING_LEVERAGE"
 # set something unsafe, and this is the last line of defense in code.
 MAX_POSITION_SIZE_PCT_CEILING = 0.25
 
+# take_profit_margin_pct / stop_loss_margin_pct are expressed as a fraction
+# of the MARGIN actually at risk (real money), not of price movement — see
+# RiskParameters below. Kept at a fixed 2:1 ratio rather than two
+# independently adjustable knobs, so a Telegram-driven change can never
+# accidentally flip the risk/reward ratio against the trader (confirmed via
+# backtest that both strategies sit right at the ~33% breakeven win rate for
+# a 1:2 ratio — inverting it would need a win rate neither comes close to).
+TAKE_PROFIT_TO_STOP_LOSS_RATIO = 2
+MAX_TAKE_PROFIT_MARGIN_PCT_CEILING = 1.0
+
 
 def _env_override(name: str, yaml_value: Any) -> Any:
     # `or None` also treats an empty string as absent — python-dotenv sets
@@ -42,19 +52,38 @@ def assert_position_size_safe(
         )
 
 
+def assert_take_profit_margin_safe(
+    take_profit_margin_pct: float, ceiling: float = MAX_TAKE_PROFIT_MARGIN_PCT_CEILING
+) -> None:
+    if take_profit_margin_pct <= 0 or take_profit_margin_pct > ceiling:
+        raise ValueError(
+            f"take_profit_margin_pct {take_profit_margin_pct} is outside the allowed "
+            f"range (0, {ceiling}]. This ceiling is hardcoded as a safety invariant, "
+            "not configurable."
+        )
+
+
 @dataclass
 class RiskParameters:
     """Risk parameters for position sizing and exits.
 
-    Loaded from YAML today; designed to be swappable for a future
-    Telegram-driven runtime config without touching the engine.
+    take_profit_margin_pct/stop_loss_margin_pct are fractions of the real
+    USDT margin at risk (pre-leverage capital), not of price movement —
+    the actual price distance needed is this divided by the leverage used,
+    computed where the order is placed (execution/orders.py) or simulated
+    (engine/risk.py). This way the real money at risk per trade stays
+    constant no matter what leverage is chosen, instead of silently
+    scaling with it as a price-based percentage would.
     """
 
     position_size_pct: float
-    stop_loss_pct: float
-    take_profit_pct: float
+    take_profit_margin_pct: float
     max_concurrent_positions: int
     fee_pct: float
+
+    @property
+    def stop_loss_margin_pct(self) -> float:
+        return self.take_profit_margin_pct / TAKE_PROFIT_TO_STOP_LOSS_RATIO
 
 
 @dataclass
@@ -164,8 +193,7 @@ def load_config(path: str | Path) -> AppConfig:
             position_size_pct=float(
                 _env_override(ENV_POSITION_SIZE_PCT, risk["position_size_pct"])
             ),
-            stop_loss_pct=float(risk["stop_loss_pct"]),
-            take_profit_pct=float(risk["take_profit_pct"]),
+            take_profit_margin_pct=float(risk["take_profit_margin_pct"]),
             max_concurrent_positions=int(risk["max_concurrent_positions"]),
             fee_pct=float(risk["fee_pct"]),
         ),

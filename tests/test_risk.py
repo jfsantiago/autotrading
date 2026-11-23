@@ -7,8 +7,7 @@ from autotrading.engine import risk
 def make_risk(**overrides) -> RiskParameters:
     defaults = dict(
         position_size_pct=0.04,
-        stop_loss_pct=0.03,
-        take_profit_pct=0.06,
+        take_profit_margin_pct=0.24,
         max_concurrent_positions=5,
         fee_pct=0.001,
     )
@@ -26,18 +25,31 @@ def test_position_notional_and_quantity():
     assert quantity == 2.0
 
 
+def test_stop_loss_margin_pct_is_half_of_take_profit():
+    r = make_risk(take_profit_margin_pct=0.10)
+    assert r.stop_loss_margin_pct == pytest.approx(0.05)
+
+
 def test_stop_loss_and_take_profit_prices():
-    r = make_risk(stop_loss_pct=0.05, take_profit_pct=0.10)
+    r = make_risk(take_profit_margin_pct=0.10)  # stop_loss_margin_pct derives to 0.05
     entry_price = 100.0
     assert risk.stop_loss_price(entry_price, r) == pytest.approx(95.0)
     assert risk.take_profit_price(entry_price, r) == pytest.approx(110.0)
 
 
 def test_stop_loss_and_take_profit_prices_mirrored_for_short():
-    r = make_risk(stop_loss_pct=0.05, take_profit_pct=0.10)
+    r = make_risk(take_profit_margin_pct=0.10)
     entry_price = 100.0
     assert risk.stop_loss_price(entry_price, r, side="short") == pytest.approx(105.0)
     assert risk.take_profit_price(entry_price, r, side="short") == pytest.approx(90.0)
+
+
+def test_stop_loss_and_take_profit_prices_divide_by_leverage():
+    r = make_risk(take_profit_margin_pct=0.20)  # stop_loss_margin_pct derives to 0.10
+    entry_price = 100.0
+    # At 4x leverage, the price only needs to move margin_pct/leverage.
+    assert risk.stop_loss_price(entry_price, r, leverage=4) == pytest.approx(97.5)
+    assert risk.take_profit_price(entry_price, r, leverage=4) == pytest.approx(105.0)
 
 
 def test_position_quantity_applies_leverage():

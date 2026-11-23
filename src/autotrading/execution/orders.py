@@ -5,7 +5,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from autotrading.config import RiskParameters
+from autotrading.config import TAKE_PROFIT_TO_STOP_LOSS_RATIO, RiskParameters
 from autotrading.execution.client import (
     assert_leverage_safe,
     futures_contract_multiplier,
@@ -29,6 +29,7 @@ class OrderResult:
     filled_quantity: float
     filled_price: float | None
     realized_pnl: float | None = None  # only populated for 'close'
+    take_profit_order: dict[str, Any] | None = None
 
 
 def calculate_position_size(
@@ -60,9 +61,15 @@ def open_long(
     symbol: str,
     quantity: float,
     leverage: int,
-    stop_loss_pct: float,
+    take_profit_margin_pct: float,
     quote_currency: str = "USDT",
 ) -> OrderResult:
+    """take_profit_margin_pct is a fraction of the real margin at risk, not
+    of price — stop-loss is always half of it (TAKE_PROFIT_TO_STOP_LOSS_RATIO),
+    never set independently, so a bad config can't invert the risk/reward
+    ratio the strategies were validated against. Both get converted to a
+    price distance by dividing by `leverage` before placing the orders.
+    """
     futures_symbol = to_futures_symbol(symbol, quote_currency)
     prepare_symbol_for_trading(client, futures_symbol, leverage)
 
@@ -75,13 +82,21 @@ def open_long(
     entry_order = client.create_order(futures_symbol, "market", "buy", contract_quantity)
 
     position = get_position_state(client, symbol, quote_currency)
+    stop_loss_margin_pct = take_profit_margin_pct / TAKE_PROFIT_TO_STOP_LOSS_RATIO
     stop_price = client.price_to_precision(
-        futures_symbol, position.entry_price * (1 - stop_loss_pct)
+        futures_symbol, position.entry_price * (1 - stop_loss_margin_pct / leverage)
     )
-    stop_qty = client.amount_to_precision(futures_symbol, position.size)
+    take_profit_price = client.price_to_precision(
+        futures_symbol, position.entry_price * (1 + take_profit_margin_pct / leverage)
+    )
+    exit_qty = client.amount_to_precision(futures_symbol, position.size)
     stop_order = client.create_order(
-        futures_symbol, "STOP_MARKET", "sell", stop_qty, None,
+        futures_symbol, "STOP_MARKET", "sell", exit_qty, None,
         {"stopPrice": stop_price, "reduceOnly": True},
+    )
+    take_profit_order = client.create_order(
+        futures_symbol, "TAKE_PROFIT_MARKET", "sell", exit_qty, None,
+        {"stopPrice": take_profit_price, "reduceOnly": True},
     )
 
     return OrderResult(
@@ -91,6 +106,7 @@ def open_long(
         stop_order=stop_order,
         filled_quantity=position.size,
         filled_price=position.entry_price,
+        take_profit_order=take_profit_order,
     )
 
 
@@ -99,9 +115,10 @@ def open_short(
     symbol: str,
     quantity: float,
     leverage: int,
-    stop_loss_pct: float,
+    take_profit_margin_pct: float,
     quote_currency: str = "USDT",
 ) -> OrderResult:
+    """Mirror of open_long — see its docstring for the margin/leverage math."""
     futures_symbol = to_futures_symbol(symbol, quote_currency)
     prepare_symbol_for_trading(client, futures_symbol, leverage)
 
@@ -112,13 +129,21 @@ def open_short(
     entry_order = client.create_order(futures_symbol, "market", "sell", contract_quantity)
 
     position = get_position_state(client, symbol, quote_currency)
+    stop_loss_margin_pct = take_profit_margin_pct / TAKE_PROFIT_TO_STOP_LOSS_RATIO
     stop_price = client.price_to_precision(
-        futures_symbol, position.entry_price * (1 + stop_loss_pct)
+        futures_symbol, position.entry_price * (1 + stop_loss_margin_pct / leverage)
     )
-    stop_qty = client.amount_to_precision(futures_symbol, position.size)
+    take_profit_price = client.price_to_precision(
+        futures_symbol, position.entry_price * (1 - take_profit_margin_pct / leverage)
+    )
+    exit_qty = client.amount_to_precision(futures_symbol, position.size)
     stop_order = client.create_order(
-        futures_symbol, "STOP_MARKET", "buy", stop_qty, None,
+        futures_symbol, "STOP_MARKET", "buy", exit_qty, None,
         {"stopPrice": stop_price, "reduceOnly": True},
+    )
+    take_profit_order = client.create_order(
+        futures_symbol, "TAKE_PROFIT_MARKET", "buy", exit_qty, None,
+        {"stopPrice": take_profit_price, "reduceOnly": True},
     )
 
     return OrderResult(
@@ -128,6 +153,7 @@ def open_short(
         stop_order=stop_order,
         filled_quantity=position.size,
         filled_price=position.entry_price,
+        take_profit_order=take_profit_order,
     )
 
 
@@ -183,14 +209,15 @@ def close_position(
     # re-fetching position state instead of trusting the entry response.
     filled_order = client.fetch_order(entry_order.get("id"), futures_symbol)
 
-    # The stop-loss placed when this position opened doesn't auto-cancel on a
-    # separate close order — clean it up so it can't misfire on a future
-    # unrelated position on the same symbol. STOP_MARKET orders are Binance
-    # "algo"/conditional orders, a separate bucket from regular orders —
-    # cancelling both is needed to actually remove the stop (confirmed via a
-    # live demo-account test: the STOP_MARKET order came back with an
-    # 'algoId' in its raw info, and plain cancel_all_orders silently left it
-    # in place; passing trigger=True routes to the algo-order endpoint).
+    # The stop-loss and take-profit placed when this position opened don't
+    # auto-cancel on a separate close order — clean them up so they can't
+    # misfire on a future unrelated position on the same symbol. STOP_MARKET/
+    # TAKE_PROFIT_MARKET orders are Binance "algo"/conditional orders, a
+    # separate bucket from regular orders — cancelling both is needed to
+    # actually remove them (confirmed via a live demo-account test: the
+    # STOP_MARKET order came back with an 'algoId' in its raw info, and
+    # plain cancel_all_orders silently left it in place; passing trigger=True
+    # routes to the algo-order endpoint and removes both at once).
     client.cancel_all_orders(futures_symbol)
     client.cancel_all_orders(futures_symbol, {"trigger": True})
 

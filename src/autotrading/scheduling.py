@@ -18,6 +18,7 @@ class BotState:
     last_run_at: datetime | None
     leverage: int | None = None  # None = no override, use YAML/env value
     position_size_pct: float | None = None  # None = no override, use YAML/env value
+    take_profit_margin_pct: float | None = None  # None = no override, use YAML value
 
 
 def ensure_bot_state_row(secrets: Secrets) -> None:
@@ -36,17 +37,21 @@ def ensure_bot_state_row(secrets: Secrets) -> None:
 def fetch_bot_state(secrets: Secrets) -> BotState:
     with psycopg2.connect(secrets.supabase_db_url) as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT bot_enabled, run_interval_minutes, last_run_at, leverage, position_size_pct "
-            "FROM bot_state WHERE id = %s",
+            "SELECT bot_enabled, run_interval_minutes, last_run_at, leverage, "
+            "position_size_pct, take_profit_margin_pct FROM bot_state WHERE id = %s",
             (BOT_STATE_ROW_ID,),
         )
-        bot_enabled, run_interval_minutes, last_run_at, leverage, position_size_pct = cur.fetchone()
+        (
+            bot_enabled, run_interval_minutes, last_run_at, leverage,
+            position_size_pct, take_profit_margin_pct,
+        ) = cur.fetchone()
     return BotState(
         bot_enabled=bot_enabled,
         run_interval_minutes=run_interval_minutes,
         last_run_at=last_run_at,
         leverage=leverage,
         position_size_pct=position_size_pct,
+        take_profit_margin_pct=take_profit_margin_pct,
     )
 
 
@@ -72,6 +77,19 @@ def set_position_size_pct(secrets: Secrets, value: float | None) -> None:
     with psycopg2.connect(secrets.supabase_db_url) as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE bot_state SET position_size_pct = %s WHERE id = %s",
+            (value, BOT_STATE_ROW_ID),
+        )
+        conn.commit()
+
+
+def set_take_profit_margin_pct(secrets: Secrets, value: float | None) -> None:
+    """stop_loss_margin_pct is always derived as half of this (see
+    RiskParameters.stop_loss_margin_pct) — there's no separate setter for
+    it, so the ratio can never drift out of sync via two independent calls.
+    """
+    with psycopg2.connect(secrets.supabase_db_url) as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE bot_state SET take_profit_margin_pct = %s WHERE id = %s",
             (value, BOT_STATE_ROW_ID),
         )
         conn.commit()

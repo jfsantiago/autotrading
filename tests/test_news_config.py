@@ -51,8 +51,7 @@ strategy_params:
   volatile_breakout: {pct_change_window: 5, pct_change_threshold: 0.05, volume_window: 20, volume_spike_zscore: 2.0}
 risk:
   position_size_pct: 0.04
-  stop_loss_pct: 0.03
-  take_profit_pct: 0.06
+  take_profit_margin_pct: 0.24
   max_concurrent_positions: 5
   fee_pct: 0.001
 output:

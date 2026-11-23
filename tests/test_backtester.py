@@ -16,10 +16,11 @@ def make_signals(values: list[Signal], index: pd.Index) -> pd.Series:
 
 
 def make_risk(**overrides) -> RiskParameters:
+    # take_profit_margin_pct=0.20 -> stop_loss_margin_pct derives to 0.10
+    # (always half — see RiskParameters.stop_loss_margin_pct).
     defaults = dict(
         position_size_pct=0.10,
-        stop_loss_pct=0.05,
-        take_profit_pct=0.20,
+        take_profit_margin_pct=0.20,
         max_concurrent_positions=5,
         fee_pct=0.0,
     )
@@ -66,9 +67,9 @@ def test_stop_loss_exit_uses_stop_price_not_close():
 
     assert len(portfolio.closed_trades) == 1
     trade = portfolio.closed_trades[0]
-    assert trade.exit_price == 95.0  # entry 100 * (1 - 0.05)
+    assert trade.exit_price == 90.0  # entry 100 * (1 - 0.10 stop_loss_margin_pct)
     assert trade.exit_reason == "stop_loss"
-    assert trade.pnl == -5.0
+    assert trade.pnl == -10.0
 
 
 def test_take_profit_exit_uses_take_profit_price():
@@ -116,7 +117,7 @@ def test_short_stop_loss_triggers_on_price_rising():
     df = make_df(
         [
             {"open": 100, "high": 101, "low": 99, "close": 100, "volume": 1},
-            {"open": 103, "high": 106, "low": 102, "close": 104, "volume": 1},
+            {"open": 108, "high": 112, "low": 107, "close": 111, "volume": 1},
         ]
     )
     signals = make_signals([Signal.SELL, Signal.HOLD], df.index)
@@ -127,9 +128,9 @@ def test_short_stop_loss_triggers_on_price_rising():
 
     assert len(portfolio.closed_trades) == 1
     trade = portfolio.closed_trades[0]
-    assert trade.exit_price == 105.0  # entry 100 * (1 + 0.05), mirrored for short
+    assert trade.exit_price == pytest.approx(110.0)  # entry * (1 + 0.10), mirrored
     assert trade.exit_reason == "stop_loss"
-    assert trade.pnl == -5.0
+    assert trade.pnl == pytest.approx(-10.0)
 
 
 def test_short_take_profit_triggers_on_price_falling():

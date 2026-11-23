@@ -14,30 +14,39 @@ from autotrading.execution.positions import PositionSide, PositionState
 
 def make_client(position_after_entry):
     client = MagicMock()
-    client.create_order = MagicMock(side_effect=[{"id": "entry-1"}, {"id": "stop-1"}])
+    client.create_order = MagicMock(
+        side_effect=[{"id": "entry-1"}, {"id": "stop-1"}, {"id": "tp-1"}]
+    )
     client.fetch_positions = MagicMock(return_value=[position_after_entry])
     client.price_to_precision = MagicMock(side_effect=lambda symbol, price: price)
     client.amount_to_precision = MagicMock(side_effect=lambda symbol, amount: amount)
     return client
 
 
-def test_open_long_sets_margin_leverage_and_places_stop():
+def test_open_long_sets_margin_leverage_and_places_stop_and_take_profit():
     client = make_client({"contracts": 1.5, "side": "long", "entryPrice": 50000.0})
 
-    result = open_long(client, "BTC/USDT", quantity=1.5, leverage=4, stop_loss_pct=0.03)
+    # take_profit_margin_pct=0.24 -> stop_loss_margin_pct derives to 0.12;
+    # at 4x leverage, price distances are 0.24/4=0.06 and 0.12/4=0.03 —
+    # same numbers as the old stop_loss_pct=0.03 test, by design.
+    result = open_long(client, "BTC/USDT", quantity=1.5, leverage=4, take_profit_margin_pct=0.24)
 
     client.set_margin_mode.assert_called_once_with("isolated", "BTC/USDT:USDT")
     client.set_leverage.assert_called_once_with(4, "BTC/USDT:USDT")
 
-    entry_call, stop_call = client.create_order.call_args_list
+    entry_call, stop_call, tp_call = client.create_order.call_args_list
     assert entry_call.args == ("BTC/USDT:USDT", "market", "buy", 1.5)
     assert stop_call.args[:3] == ("BTC/USDT:USDT", "STOP_MARKET", "sell")
     assert stop_call.args[3] == 1.5
     assert stop_call.args[5]["stopPrice"] == pytest.approx(50000.0 * 0.97)
     assert stop_call.args[5]["reduceOnly"] is True
+    assert tp_call.args[:3] == ("BTC/USDT:USDT", "TAKE_PROFIT_MARKET", "sell")
+    assert tp_call.args[5]["stopPrice"] == pytest.approx(50000.0 * 1.06)
+    assert tp_call.args[5]["reduceOnly"] is True
 
     assert result.action == "open_long"
     assert result.filled_price == 50000.0
+    assert result.take_profit_order == {"id": "tp-1"}
 
 
 def test_open_long_pepe_divides_quantity_by_1000_for_futures_contract():
@@ -47,21 +56,25 @@ def test_open_long_pepe_divides_quantity_by_1000_for_futures_contract():
     # max order quantity (-4005, confirmed live).
     client = make_client({"contracts": 5.0, "side": "long", "entryPrice": 0.000007})
 
-    open_long(client, "PEPE/USDT", quantity=5000.0, leverage=4, stop_loss_pct=0.03)
+    open_long(client, "PEPE/USDT", quantity=5000.0, leverage=4, take_profit_margin_pct=0.24)
 
-    entry_call, _ = client.create_order.call_args_list
+    entry_call, _, _ = client.create_order.call_args_list
     assert entry_call.args == ("1000PEPE/USDT:USDT", "market", "buy", 5.0)
 
 
-def test_open_short_places_stop_above_entry():
+def test_open_short_places_stop_above_entry_and_take_profit_below():
     client = make_client({"contracts": 2.0, "side": "short", "entryPrice": 3000.0})
 
-    result = open_short(client, "ETH/USDT", quantity=2.0, leverage=5, stop_loss_pct=0.05)
+    # take_profit_margin_pct=0.40 -> stop_loss_margin_pct derives to 0.20;
+    # at 5x leverage, price distances are 0.40/5=0.08 and 0.20/5=0.04.
+    result = open_short(client, "ETH/USDT", quantity=2.0, leverage=5, take_profit_margin_pct=0.40)
 
-    entry_call, stop_call = client.create_order.call_args_list
+    entry_call, stop_call, tp_call = client.create_order.call_args_list
     assert entry_call.args == ("ETH/USDT:USDT", "market", "sell", 2.0)
     assert stop_call.args[:3] == ("ETH/USDT:USDT", "STOP_MARKET", "buy")
-    assert stop_call.args[5]["stopPrice"] == pytest.approx(3000.0 * 1.05)
+    assert stop_call.args[5]["stopPrice"] == pytest.approx(3000.0 * 1.04)
+    assert tp_call.args[:3] == ("ETH/USDT:USDT", "TAKE_PROFIT_MARKET", "buy")
+    assert tp_call.args[5]["stopPrice"] == pytest.approx(3000.0 * 0.92)
     assert result.action == "open_short"
 
 
@@ -70,7 +83,7 @@ def test_margin_mode_already_set_error_is_swallowed():
     client.set_margin_mode.side_effect = Exception('{"code":-4046,"msg":"No need to change margin type."}')
 
     # should not raise
-    open_long(client, "BTC/USDT", quantity=1.0, leverage=2, stop_loss_pct=0.03)
+    open_long(client, "BTC/USDT", quantity=1.0, leverage=2, take_profit_margin_pct=0.24)
 
 
 def test_other_margin_mode_error_propagates():
@@ -78,7 +91,7 @@ def test_other_margin_mode_error_propagates():
     client.set_margin_mode.side_effect = Exception("some other failure")
 
     with pytest.raises(Exception, match="some other failure"):
-        open_long(client, "BTC/USDT", quantity=1.0, leverage=2, stop_loss_pct=0.03)
+        open_long(client, "BTC/USDT", quantity=1.0, leverage=2, take_profit_margin_pct=0.24)
 
 
 def test_close_position_sends_reduce_only_opposite_side_and_cancels_orders():
