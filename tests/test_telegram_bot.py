@@ -20,6 +20,7 @@ from autotrading.telegram_bot import (
     cmd_set_risk,
     cmd_settings,
     cmd_status,
+    cmd_universe,
     notify,
     on_close_callback,
     require_telegram_secrets,
@@ -132,6 +133,37 @@ def test_cmd_positions_handles_no_open_positions():
 
     text = update.message.reply_text.call_args.args[0]
     assert "Sin posiciones" in text
+
+
+def test_cmd_universe_lists_both_buckets_with_strategy():
+    secrets = make_secrets()
+    config = SimpleNamespace(
+        stable=SimpleNamespace(symbols=["BTC/USDT", "XRP/USDT"], strategy="stable_trend"),
+        volatile=SimpleNamespace(symbols=["PEPE/USDT", "ARB/USDT"], strategy="volatile_breakout"),
+    )
+    update = make_update(chat_id=AUTHORIZED_CHAT_ID)
+    context = make_context(secrets=secrets, config=config)
+
+    asyncio.run(cmd_universe(update, context))
+
+    text = update.message.reply_text.call_args.args[0]
+    assert "BTC" in text and "XRP" in text
+    assert "PEPE" in text and "ARB" in text
+    assert "tendencia" in text and "ruptura" in text
+
+
+def test_cmd_universe_ignores_unauthorized_chat():
+    secrets = make_secrets()
+    config = SimpleNamespace(
+        stable=SimpleNamespace(symbols=["BTC/USDT"], strategy="stable_trend"),
+        volatile=SimpleNamespace(symbols=["PEPE/USDT"], strategy="volatile_breakout"),
+    )
+    update = make_update(chat_id=999)
+    context = make_context(secrets=secrets, config=config)
+
+    asyncio.run(cmd_universe(update, context))
+
+    update.message.reply_text.assert_not_called()
 
 
 def test_cmd_history_shows_recent_trades():

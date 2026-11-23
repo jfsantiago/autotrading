@@ -7,10 +7,10 @@ initial_capital: 10000
 
 universe:
   stable:
-    symbols: ["BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT"]
+    symbols: ["BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "XRP/USDT", "LINK/USDT"]
     strategy: stable_trend
   volatile:
-    symbols: ["PEPE/USDT", "WIF/USDT", "INJ/USDT"]
+    symbols: ["PEPE/USDT", "WIF/USDT", "INJ/USDT", "ARB/USDT", "WLD/USDT"]
     strategy: volatile_breakout
 
 strategy_params:

@@ -83,6 +83,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "Toca el botón de menú (☰ junto al campo de texto) para ver los "
         "comandos disponibles:\n\n"
         "/positions — posiciones abiertas ahora\n"
+        "/universe — criptos que el bot evalúa en cada revisión\n"
         "/history — últimos cierres y su PnL\n"
         "/balance — saldo total de la cuenta\n"
         "/close — cerrar una posición abierta manualmente\n"
@@ -147,6 +148,33 @@ async def cmd_positions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await update.message.reply_text(
         f"Posiciones abiertas:\n<pre>{table}</pre>", parse_mode=ParseMode.HTML
     )
+
+
+_STRATEGY_LABELS = {
+    "stable_trend": "tendencia (cruce de medias + RSI)",
+    "volatile_breakout": "ruptura (momentum + volumen)",
+}
+
+
+async def cmd_universe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    secrets: Secrets = context.bot_data["secrets"]
+    if not await _guarded(update, secrets):
+        return
+
+    config: AppConfig = context.bot_data["config"]
+
+    def format_bucket(name: str, symbols: list[str], strategy: str) -> str:
+        symbol_list = ", ".join(s.split("/")[0] for s in symbols)
+        strategy_label = _STRATEGY_LABELS.get(strategy, strategy)
+        return f"{name} ({strategy_label}):\n{symbol_list}"
+
+    text = "\n\n".join(
+        [
+            format_bucket("Estables", config.stable.symbols, config.stable.strategy),
+            format_bucket("Volátiles", config.volatile.symbols, config.volatile.strategy),
+        ]
+    )
+    await update.message.reply_text(text)
 
 
 async def cmd_balance(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -441,6 +469,7 @@ async def _set_command_menu(application: Application) -> None:
     await application.bot.set_my_commands(
         [
             BotCommand("positions", "Posiciones abiertas ahora"),
+            BotCommand("universe", "Criptos que el bot evalúa"),
             BotCommand("history", "Últimos cierres y su PnL"),
             BotCommand("balance", "Saldo total de la cuenta"),
             BotCommand("close", "Cerrar una posición abierta"),
@@ -489,6 +518,7 @@ def run(config: AppConfig, secrets: Secrets, client: Any) -> None:
     auth_filter = filters.Chat(chat_id=secrets.telegram_chat_id)
     application.add_handler(CommandHandler(["start", "help"], cmd_start, filters=auth_filter))
     application.add_handler(CommandHandler("positions", cmd_positions, filters=auth_filter))
+    application.add_handler(CommandHandler("universe", cmd_universe, filters=auth_filter))
     application.add_handler(CommandHandler("history", cmd_history, filters=auth_filter))
     application.add_handler(CommandHandler("balance", cmd_balance, filters=auth_filter))
     application.add_handler(CommandHandler("close", cmd_close, filters=auth_filter))
