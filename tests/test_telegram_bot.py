@@ -8,6 +8,7 @@ import pytest
 from autotrading.scheduling import BotState
 from autotrading.secrets import Secrets
 from autotrading.telegram_bot import (
+    _fmt_num,
     _is_authorized,
     cmd_history,
     cmd_positions,
@@ -93,7 +94,8 @@ def test_cmd_positions_shows_open_positions_with_unrealized_pnl():
 
     update.message.reply_text.assert_called_once()
     text = update.message.reply_text.call_args.args[0]
-    assert "BTC/USDT" in text
+    assert "BTC" in text  # base ticker only, "/USDT" dropped for table width
+    assert "50000" in text  # not scientific notation ("5e+04")
     assert "25" in text
 
 
@@ -135,8 +137,9 @@ def test_cmd_history_shows_recent_trades():
         asyncio.run(cmd_history(update, context))
 
     text = update.message.reply_text.call_args.args[0]
-    assert "BTC/USDT" in text
+    assert "BTC" in text  # base ticker only, "/USDT" dropped for table width
     assert "10.0" in text or "+10.0000" in text
+    assert "0101-1200" in text  # no-space date format ("ddmm-HHMM")
 
 
 def test_cmd_history_handles_no_trades():
@@ -193,3 +196,17 @@ def test_notify_swallows_send_failures():
 
     with patch("autotrading.telegram_bot.Bot", return_value=mock_bot):
         notify(secrets, "hola")  # should not raise
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        (50000.0, "50000"),  # not "5e+04"
+        (6688.8, "6688.8"),
+        (1.5, "1.5"),
+        (0.1195, "0.1195"),
+        (0.0, "0"),
+    ],
+)
+def test_fmt_num_never_uses_scientific_notation(value, expected):
+    assert _fmt_num(value) == expected

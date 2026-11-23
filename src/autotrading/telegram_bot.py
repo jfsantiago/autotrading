@@ -80,6 +80,17 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
+def _fmt_num(value: float) -> str:
+    """Fixed-point formatting, never scientific notation — %g switched to
+    "5e+04" for a $50,000 BTC entry price, confusing for a non-technical
+    reader. Large values get 2 decimals, small ones (sub-cent crypto
+    prices) get up to 8, then trailing zeros are trimmed either way.
+    """
+    text = f"{value:.2f}" if abs(value) >= 1 else f"{value:.8f}"
+    text = text.rstrip("0").rstrip(".")
+    return text or "0"
+
+
 async def cmd_positions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     secrets: Secrets = context.bot_data["secrets"]
     if not await _guarded(update, secrets):
@@ -95,14 +106,15 @@ async def cmd_positions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await update.message.reply_text("Sin posiciones abiertas ahora mismo.")
         return
 
-    header = f"{'Symbol':<9}{'Lado':<5}{'Cant.':>9}{'Entrada':>10}{'PnL no real.':>13}"
+    header = f"{'Symbol':<8}{'Lado':<6}{'Cant.':>9}{'Entrada':>10}{'PnL':>10}"
     rows = [header, "-" * len(header)]
     for p in positions:
         pnl = p["unrealized_pnl"]
         pnl_str = f"{pnl:+.4f}" if pnl is not None else "?"
+        base_symbol = p["symbol"].split("/")[0]
         rows.append(
-            f"{p['symbol']:<9}{p['side']:<5}{p['size']:>9.4g}"
-            f"{p['entry_price']:>10.4g}{pnl_str:>13}"
+            f"{base_symbol:<8}{p['side']:<6}{_fmt_num(p['size']):>9}"
+            f"{_fmt_num(p['entry_price']):>10}{pnl_str:>10}"
         )
     table = "\n".join(rows)
     await update.message.reply_text(
@@ -112,18 +124,19 @@ async def cmd_positions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 def _format_trades_table(trades: list) -> str:
     # Monospace table via <pre> — Telegram has no native table widget, but a
-    # fixed-width font makes columns line up. General-format (%g) for
-    # prices/qty since values span from ~$90k (BTC) to ~$0.000001-scale
-    # tokens; a fixed decimal count would break at one end or the other.
-    header = f"{'Symbol':<9}{'Lado':<5}{'Cant.':>9}{'Entrada':>10}{'Salida':>10}{'PnL':>9}{'Fecha':>12}"
+    # fixed-width font makes columns line up. Kept to the essential columns
+    # (entry/exit price dropped) and the date uses no internal space
+    # ("ddmm-HHMM") specifically because a space is where Telegram's
+    # renderer was wrapping the line on narrow phone screens — confirmed
+    # live, punctuation doesn't trigger the same wrap.
+    header = f"{'Symbol':<8}{'Lado':<6}{'Cant.':>9}{'PnL':>10}{'Fecha':>11}"
     rows = [header, "-" * len(header)]
     for t in trades:
         pnl_str = f"{t.realized_pnl:+.4f}" if t.realized_pnl is not None else "?"
-        exit_str = f"{t.exit_price:.4g}" if t.exit_price is not None else "?"
-        date_str = t.closed_at.strftime("%m-%d %H:%M")
+        date_str = t.closed_at.strftime("%d%m-%H%M")
+        base_symbol = t.symbol.split("/")[0]
         rows.append(
-            f"{t.symbol:<9}{t.position_side:<5}{t.quantity:>9.4g}"
-            f"{t.entry_price:>10.4g}{exit_str:>10}{pnl_str:>9}{date_str:>12}"
+            f"{base_symbol:<8}{t.position_side:<6}{_fmt_num(t.quantity):>9}{pnl_str:>10}{date_str:>11}"
         )
     return "\n".join(rows)
 
