@@ -6,7 +6,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from autotrading.config import RiskParameters
-from autotrading.execution.client import assert_leverage_safe, to_futures_symbol
+from autotrading.execution.client import (
+    assert_leverage_safe,
+    futures_contract_multiplier,
+    to_futures_symbol,
+)
 from autotrading.execution.positions import PositionSide, PositionState, get_position_state
 
 logger = logging.getLogger(__name__)
@@ -62,7 +66,13 @@ def open_long(
     futures_symbol = to_futures_symbol(symbol, quote_currency)
     prepare_symbol_for_trading(client, futures_symbol, leverage)
 
-    entry_order = client.create_order(futures_symbol, "market", "buy", quantity)
+    # `quantity` is in real token units (computed from the spot price) —
+    # convert to the exchange's contract units before ordering, a no-op
+    # (divide by 1) for every symbol except the "1000X" ones.
+    contract_quantity = client.amount_to_precision(
+        futures_symbol, quantity / futures_contract_multiplier(symbol, quote_currency)
+    )
+    entry_order = client.create_order(futures_symbol, "market", "buy", contract_quantity)
 
     position = get_position_state(client, symbol, quote_currency)
     stop_price = client.price_to_precision(
@@ -95,7 +105,11 @@ def open_short(
     futures_symbol = to_futures_symbol(symbol, quote_currency)
     prepare_symbol_for_trading(client, futures_symbol, leverage)
 
-    entry_order = client.create_order(futures_symbol, "market", "sell", quantity)
+    # Same real-token -> contract-unit conversion as open_long.
+    contract_quantity = client.amount_to_precision(
+        futures_symbol, quantity / futures_contract_multiplier(symbol, quote_currency)
+    )
+    entry_order = client.create_order(futures_symbol, "market", "sell", contract_quantity)
 
     position = get_position_state(client, symbol, quote_currency)
     stop_price = client.price_to_precision(

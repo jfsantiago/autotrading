@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 import ccxt
 
 from autotrading.secrets import Secrets
@@ -32,6 +34,27 @@ def to_futures_symbol(symbol: str, quote_currency: str = "USDT") -> str:
     base = symbol[: -len(suffix)]
     base = FUTURES_BASE_SYMBOL_OVERRIDES.get(base, base)
     return f"{base}/{quote_currency}:{quote_currency}"
+
+
+def futures_contract_multiplier(symbol: str, quote_currency: str = "USDT") -> int:
+    """A quantity computed from the real per-token spot price (as
+    calculate_position_size does) is in actual token units. For a "1000X"
+    contract (see FUTURES_BASE_SYMBOL_OVERRIDES), Binance's order quantity
+    is denominated in batches of that many tokens, not individual tokens —
+    sending the raw token count as-is overshoots the exchange's max order
+    quantity by the same factor. Confirmed live: an order for PEPE failed
+    with -4005 "Quantity greater than max quantity" before this existed.
+    The multiplier is parsed from the override's "1000PEPE"-style prefix
+    rather than hardcoded, so it keeps working if more such entries are
+    added (1000SHIB, 1000BONK, etc. all follow the same naming).
+    """
+    suffix = f"/{quote_currency}"
+    base = symbol[: -len(suffix)] if symbol.endswith(suffix) else symbol
+    futures_base = FUTURES_BASE_SYMBOL_OVERRIDES.get(base)
+    if futures_base is None:
+        return 1
+    match = re.match(r"(\d+)", futures_base)
+    return int(match.group(1)) if match else 1
 
 
 def assert_leverage_safe(leverage: int, ceiling: int = MAX_LEVERAGE_CEILING) -> None:

@@ -3,6 +3,7 @@ import pytest
 from autotrading.execution.client import (
     MAX_LEVERAGE_CEILING,
     assert_leverage_safe,
+    futures_contract_multiplier,
     to_futures_symbol,
 )
 
@@ -25,6 +26,15 @@ def test_to_futures_symbol_applies_1000x_override():
 def test_to_futures_symbol_leaves_unaffected_symbols_alone():
     assert to_futures_symbol("WIF/USDT") == "WIF/USDT:USDT"
     assert to_futures_symbol("INJ/USDT") == "INJ/USDT:USDT"
+
+
+def test_futures_contract_multiplier_is_1000_for_pepe():
+    assert futures_contract_multiplier("PEPE/USDT") == 1000
+
+
+def test_futures_contract_multiplier_is_1_for_unaffected_symbols():
+    assert futures_contract_multiplier("BTC/USDT") == 1
+    assert futures_contract_multiplier("WIF/USDT") == 1
 
 
 @pytest.mark.parametrize("leverage", [1, 4, MAX_LEVERAGE_CEILING])

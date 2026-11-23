@@ -40,6 +40,19 @@ def test_open_long_sets_margin_leverage_and_places_stop():
     assert result.filled_price == 50000.0
 
 
+def test_open_long_pepe_divides_quantity_by_1000_for_futures_contract():
+    # PEPE's quantity is computed from the real per-token spot price, but
+    # Binance's "1000PEPE" futures contract is denominated in batches of
+    # 1000 tokens — sending the raw token count overshoots the exchange's
+    # max order quantity (-4005, confirmed live).
+    client = make_client({"contracts": 5.0, "side": "long", "entryPrice": 0.000007})
+
+    open_long(client, "PEPE/USDT", quantity=5000.0, leverage=4, stop_loss_pct=0.03)
+
+    entry_call, _ = client.create_order.call_args_list
+    assert entry_call.args == ("1000PEPE/USDT:USDT", "market", "buy", 5.0)
+
+
 def test_open_short_places_stop_above_entry():
     client = make_client({"contracts": 2.0, "side": "short", "entryPrice": 3000.0})
 
