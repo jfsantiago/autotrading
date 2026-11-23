@@ -7,6 +7,7 @@ import pytest
 
 from autotrading.execution.orders import OrderResult
 from autotrading.execution.positions import PositionSide, PositionState
+from autotrading.position_tracking import TrackedPosition
 from autotrading.scheduling import BotState
 from autotrading.secrets import Secrets
 from autotrading.telegram_bot import (
@@ -103,20 +104,58 @@ def test_cmd_positions_shows_open_positions_with_unrealized_pnl():
                 "side": "long",
                 "entryPrice": 50000.0,
                 "unrealizedPnl": 25.0,
+                "initialMargin": 300.0,
             }
         ]
     )
     update = make_update(chat_id=AUTHORIZED_CHAT_ID)
     context = make_context(secrets=secrets, config=config, client=client)
 
-    asyncio.run(cmd_positions(update, context))
+    with patch("autotrading.telegram_bot.position_tracking.fetch_all_tracked_positions", return_value={}):
+        asyncio.run(cmd_positions(update, context))
 
     update.message.reply_text.assert_called_once()
     text = update.message.reply_text.call_args.args[0]
     assert "BTC" in text  # base ticker only, "/USDT" dropped for table width
-    assert "50000" in text  # not scientific notation ("5e+04")
-    assert "75000" in text  # Valor = Cant. x Entrada = 1.5 * 50000
+    assert "300" in text  # Cant. = margen real en USDT, no la cantidad del activo
     assert "25" in text
+
+
+def test_cmd_positions_shows_opened_date_from_tracking():
+    secrets = make_secrets()
+    config = SimpleNamespace(
+        all_symbols=["BTC/USDT"], futures=SimpleNamespace(quote_currency="USDT")
+    )
+    client = MagicMock()
+    client.fetch_positions = MagicMock(
+        return_value=[
+            {
+                "symbol": "BTC/USDT:USDT",
+                "contracts": 1.5,
+                "side": "long",
+                "entryPrice": 50000.0,
+                "unrealizedPnl": 25.0,
+                "initialMargin": 300.0,
+            }
+        ]
+    )
+    update = make_update(chat_id=AUTHORIZED_CHAT_ID)
+    context = make_context(secrets=secrets, config=config, client=client)
+    tracked = {
+        "BTC/USDT": TrackedPosition(
+            symbol="BTC/USDT", position_side="long", quantity=1.5, entry_price=50000.0,
+            margin=300.0, opened_at=datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc),
+        )
+    }
+
+    with patch(
+        "autotrading.telegram_bot.position_tracking.fetch_all_tracked_positions",
+        return_value=tracked,
+    ):
+        asyncio.run(cmd_positions(update, context))
+
+    text = update.message.reply_text.call_args.args[0]
+    assert "260101:1200" in text  # date format "YYMMDD:HHMM" (2-digit year)
 
 
 def test_cmd_positions_handles_no_open_positions():
@@ -179,6 +218,7 @@ def test_cmd_history_shows_recent_trades():
         exit_price=110.0,
         realized_pnl=10.0,
         closed_via="bot",
+        margin=200.0,
         closed_at=datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc),
     )
 
@@ -190,8 +230,9 @@ def test_cmd_history_shows_recent_trades():
 
     text = update.message.reply_text.call_args.args[0]
     assert "BTC" in text  # base ticker only, "/USDT" dropped for table width
+    assert "200" in text  # Cant. = margen real en USDT
     assert "10.0" in text or "+10.0000" in text
-    assert "20260101:1200" in text  # date format "YYYYMMDD:HHMM"
+    assert "260101:1200" in text  # date format "YYMMDD:HHMM" (2-digit year)
     assert "largo" in text  # "long" translated for display
     assert "bot" in text  # closed_via == "bot" shown in the "Vía" column
 
@@ -209,6 +250,7 @@ def test_cmd_history_marks_stop_loss_closes_distinctly():
         exit_price=97.0,
         realized_pnl=-3.0,
         closed_via="stop_loss",
+        margin=100.0,
         closed_at=datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc),
     )
 

@@ -276,6 +276,7 @@ def _reconcile_stop_loss_closes(
                 track_open_position(
                     secrets, symbol=symbol, position_side=position.side.value,
                     quantity=position.size, entry_price=position.entry_price,
+                    margin=position.margin,
                 )
             continue
 
@@ -304,6 +305,7 @@ def _reconcile_stop_loss_closes(
                 secrets, symbol=symbol, position_side=tracked_position.position_side,
                 quantity=tracked_position.quantity, entry_price=tracked_position.entry_price,
                 exit_price=exit_price, realized_pnl=realized_pnl, closed_via="stop_loss",
+                margin=tracked_position.margin,
             )
             untrack_position(secrets, symbol)
         except Exception as exc:
@@ -427,6 +429,7 @@ def run_trade_command(args: argparse.Namespace) -> int:
                     track_open_position(
                         secrets, symbol=decision.symbol, position_side=position_side,
                         quantity=result.filled_quantity, entry_price=result.filled_price,
+                        margin=equity * config.risk.position_size_pct,
                     )
                 except Exception as exc:
                     print(f"WARNING: failed to track open position for {decision.symbol}: {exc}")
@@ -442,6 +445,7 @@ def run_trade_command(args: argparse.Namespace) -> int:
                         entry_price=closed_position.entry_price,
                         exit_price=result.filled_price,
                         realized_pnl=result.realized_pnl,
+                        margin=closed_position.margin,
                     )
                     untrack_position(secrets, decision.symbol)
                 except Exception as exc:

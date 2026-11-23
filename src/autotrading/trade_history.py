@@ -17,6 +17,7 @@ class ClosedTrade:
     exit_price: float | None
     realized_pnl: float | None
     closed_via: str
+    margin: float | None
     closed_at: datetime
 
 
@@ -30,13 +31,17 @@ def record_closed_trade(
     exit_price: float | None,
     realized_pnl: float | None,
     closed_via: str = "bot",
+    margin: float | None = None,
 ) -> None:
     with psycopg2.connect(secrets.supabase_db_url) as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO closed_trades "
-            "(symbol, position_side, quantity, entry_price, exit_price, realized_pnl, closed_via) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s)",
-            (symbol, position_side, quantity, entry_price, exit_price, realized_pnl, closed_via),
+            "(symbol, position_side, quantity, entry_price, exit_price, realized_pnl, "
+            "closed_via, margin) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+            (
+                symbol, position_side, quantity, entry_price, exit_price, realized_pnl,
+                closed_via, margin,
+            ),
         )
         conn.commit()
 
@@ -45,7 +50,7 @@ def fetch_recent_closed_trades(secrets: Secrets, limit: int = 10) -> list[Closed
     with psycopg2.connect(secrets.supabase_db_url) as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT symbol, position_side, quantity, entry_price, exit_price, "
-            "realized_pnl, closed_via, closed_at FROM closed_trades "
+            "realized_pnl, closed_via, margin, closed_at FROM closed_trades "
             "ORDER BY closed_at DESC LIMIT %s",
             (limit,),
         )

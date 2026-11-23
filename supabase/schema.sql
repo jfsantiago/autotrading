@@ -59,6 +59,12 @@ create index if not exists closed_trades_closed_at_idx on closed_trades (closed_
 alter table closed_trades add column if not exists
     closed_via text not null default 'bot' check (closed_via in ('bot', 'stop_loss'));
 
+-- Real USDT margin committed to the trade (pre-leverage capital at risk),
+-- captured at open time via open_position_tracking.margin — nullable since
+-- trades recorded before this column existed have no way to recover it
+-- after the fact (the position no longer exists on Binance once closed).
+alter table closed_trades add column if not exists margin double precision;
+
 -- Tracks positions WE opened (symbol, side, qty, entry) so a scheduled
 -- review can notice when Binance shows a symbol as flat that we still
 -- think is open — meaning the exchange's own stop-loss (or something
@@ -72,3 +78,8 @@ create table if not exists open_position_tracking (
     entry_price   double precision not null,
     opened_at     timestamptz not null default now()
 );
+
+-- Real USDT margin committed (pre-leverage) — carried over to
+-- closed_trades.margin when the position closes, since Binance's own
+-- figure (position.initialMargin) stops being queryable once it's gone.
+alter table open_position_tracking add column if not exists margin double precision;

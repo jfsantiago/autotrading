@@ -36,12 +36,13 @@ def test_track_open_position_upserts_expected_row():
             position_side="long",
             quantity=1.5,
             entry_price=50000.0,
+            margin=200.0,
         )
 
     query, params = cursor.execute.call_args.args
     assert "INSERT INTO open_position_tracking" in query
     assert "ON CONFLICT (symbol) DO UPDATE" in query
-    assert params == ("BTC/USDT", "long", 1.5, 50000.0)
+    assert params == ("BTC/USDT", "long", 1.5, 50000.0, 200.0)
     conn.commit.assert_called_once()
 
 
@@ -62,8 +63,8 @@ def test_fetch_all_tracked_positions_parses_rows_into_dict():
     cursor = MagicMock()
     opened_at = datetime.now(timezone.utc)
     cursor.fetchall.return_value = [
-        ("BTC/USDT", "long", 1.5, 50000.0, opened_at),
-        ("ETH/USDT", "short", 2.0, 3000.0, opened_at),
+        ("BTC/USDT", "long", 1.5, 50000.0, 200.0, opened_at),
+        ("ETH/USDT", "short", 2.0, 3000.0, None, opened_at),
     ]
     conn = make_mock_conn(cursor)
 
@@ -73,4 +74,6 @@ def test_fetch_all_tracked_positions_parses_rows_into_dict():
     assert set(tracked.keys()) == {"BTC/USDT", "ETH/USDT"}
     assert tracked["BTC/USDT"].position_side == "long"
     assert tracked["BTC/USDT"].entry_price == 50000.0
+    assert tracked["BTC/USDT"].margin == 200.0
     assert tracked["ETH/USDT"].quantity == 2.0
+    assert tracked["ETH/USDT"].margin is None

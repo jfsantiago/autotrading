@@ -128,6 +128,7 @@ def test_trade_with_confirm_closes_long_records_history(tmp_path):
                     "entry_price": 100.0,
                     "exit_price": 105.0,
                     "realized_pnl": 5.0,
+                    "margin": None,
                 }
 
     assert exit_code == 0
@@ -211,7 +212,7 @@ def test_reconcile_skips_when_still_open_and_already_tracked():
     position = PositionState(symbol="BTC/USDT", side=PositionSide.LONG, size=1.0, entry_price=100.0)
     tracked = TrackedPosition(
         symbol="BTC/USDT", position_side="long", quantity=1.0, entry_price=100.0,
-        opened_at=datetime.now(timezone.utc),
+        margin=100.0, opened_at=datetime.now(timezone.utc),
     )
     with patch("autotrading.cli.fetch_all_tracked_positions", return_value={"BTC/USDT": tracked}), \
          patch("autotrading.cli.track_open_position") as mock_track, \
@@ -233,7 +234,8 @@ def test_reconcile_self_heals_untracked_open_position():
             make_fake_secrets(), object(), make_fake_config(), ["BTC/USDT"], {"BTC/USDT": position}
         )
     mock_track.assert_called_once_with(
-        make_fake_secrets(), symbol="BTC/USDT", position_side="long", quantity=1.0, entry_price=100.0
+        make_fake_secrets(), symbol="BTC/USDT", position_side="long", quantity=1.0,
+        entry_price=100.0, margin=None,
     )
 
 
@@ -251,7 +253,7 @@ def test_reconcile_records_stop_loss_close_when_tracked_long_now_flat():
     position = PositionState(symbol="BTC/USDT", side=PositionSide.FLAT, size=0.0, entry_price=None)
     tracked = TrackedPosition(
         symbol="BTC/USDT", position_side="long", quantity=2.0, entry_price=100.0,
-        opened_at=datetime.now(timezone.utc),
+        margin=50.0, opened_at=datetime.now(timezone.utc),
     )
     with patch("autotrading.cli.fetch_all_tracked_positions", return_value={"BTC/USDT": tracked}), \
          patch("autotrading.cli.fetch_realized_pnl", return_value=10.0), \
@@ -265,6 +267,7 @@ def test_reconcile_records_stop_loss_close_when_tracked_long_now_flat():
     mock_record.assert_called_once_with(
         make_fake_secrets(), symbol="BTC/USDT", position_side="long", quantity=2.0,
         entry_price=100.0, exit_price=105.0, realized_pnl=10.0, closed_via="stop_loss",
+        margin=50.0,
     )
     mock_untrack.assert_called_once_with(make_fake_secrets(), "BTC/USDT")
     mock_notify.assert_called_once()
@@ -275,7 +278,7 @@ def test_reconcile_records_stop_loss_close_for_short():
     position = PositionState(symbol="ETH/USDT", side=PositionSide.FLAT, size=0.0, entry_price=None)
     tracked = TrackedPosition(
         symbol="ETH/USDT", position_side="short", quantity=2.0, entry_price=3000.0,
-        opened_at=datetime.now(timezone.utc),
+        margin=50.0, opened_at=datetime.now(timezone.utc),
     )
     with patch("autotrading.cli.fetch_all_tracked_positions", return_value={"ETH/USDT": tracked}), \
          patch("autotrading.cli.fetch_realized_pnl", return_value=20.0), \
@@ -293,7 +296,7 @@ def test_reconcile_leaves_tracked_when_no_realized_pnl_found():
     position = PositionState(symbol="BTC/USDT", side=PositionSide.FLAT, size=0.0, entry_price=None)
     tracked = TrackedPosition(
         symbol="BTC/USDT", position_side="long", quantity=2.0, entry_price=100.0,
-        opened_at=datetime.now(timezone.utc),
+        margin=50.0, opened_at=datetime.now(timezone.utc),
     )
     with patch("autotrading.cli.fetch_all_tracked_positions", return_value={"BTC/USDT": tracked}), \
          patch("autotrading.cli.fetch_realized_pnl", return_value=None), \

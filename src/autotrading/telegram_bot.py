@@ -69,6 +69,7 @@ def _fetch_open_positions_with_pnl(
                 "size": abs(position.get("contracts")),
                 "entry_price": position.get("entryPrice"),
                 "unrealized_pnl": position.get("unrealizedPnl"),
+                "margin": position.get("initialMargin"),
             }
         )
     return open_positions
@@ -129,20 +130,28 @@ async def cmd_positions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await update.message.reply_text("Sin posiciones abiertas ahora mismo.")
         return
 
-    # "Valor" (= Cant. x Entrada, the leveraged notional in USD) makes the
-    # actual exposure legible at a glance — "Cant." alone is an asset
-    # quantity (e.g. "0.015" BTC), easy to mistake for the margin at risk
-    # when it's really that amount multiplied by leverage.
-    header = f"{'Symbol':<8}{'Lado':<6}{'Cant.':>9}{'Valor':>10}{'Entrada':>10}{'PnL':>10}"
+    # Fecha de apertura no viene del propio fetch_positions de Binance (no
+    # trae un timestamp de apertura confiable) — sale de nuestra propia
+    # tabla de tracking, la misma que usa la detección de stop-loss.
+    tracked = position_tracking.fetch_all_tracked_positions(secrets)
+
+    # "Cant." muestra el margen real en USDT puesto de la cuenta (lo que de
+    # verdad se arriesgó), no la cantidad del activo ni el notional
+    # apalancado — eso es lo que se confundía antes.
+    header = f"{'Symbol':<8}{'Lado':<6}{'Cant.':>9}{'PnL':>10}{'Fecha':>12}"
     rows = [header, "-" * len(header)]
     for p in positions:
         pnl = p["unrealized_pnl"]
         pnl_str = f"{pnl:+.4f}" if pnl is not None else "?"
         base_symbol = p["symbol"].split("/")[0]
-        notional = p["size"] * p["entry_price"]
+        margin_str = _fmt_num(p["margin"]) if p["margin"] is not None else "?"
+        tracked_position = tracked.get(p["symbol"])
+        date_str = (
+            tracked_position.opened_at.strftime("%y%m%d:%H%M") if tracked_position else "?"
+        )
         rows.append(
-            f"{base_symbol:<8}{_fmt_side(p['side']):<6}{_fmt_num(p['size']):>9}"
-            f"{_fmt_num(notional):>10}{_fmt_num(p['entry_price']):>10}{pnl_str:>10}"
+            f"{base_symbol:<8}{_fmt_side(p['side']):<6}{margin_str:>9}"
+            f"{pnl_str:>10}{date_str:>12}"
         )
     table = "\n".join(rows)
     await update.message.reply_text(
@@ -307,6 +316,7 @@ async def on_close_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 exit_price=result.filled_price,
                 realized_pnl=result.realized_pnl,
                 closed_via="bot",
+                margin=position.margin,
             )
             position_tracking.untrack_position(secrets, symbol)
         except Exception as exc:
@@ -324,24 +334,24 @@ async def on_close_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 def _format_trades_table(trades: list) -> str:
     # Monospace table via <pre> — Telegram has no native table widget, but a
-    # fixed-width font makes columns line up. Kept to the essential columns
-    # (entry/exit price dropped). Date format "YYYYMMDD:HHMM" per explicit
-    # request — no internal space (a space was the earlier wrap point on
-    # narrow phone screens, confirmed live; ":" doesn't trigger the same).
-    # "Vía" tells a stop-loss-triggered close (fired directly on Binance,
-    # bypassing the bot's own close logic) apart from one the bot decided
-    # on itself — otherwise a surprise stop-loss would look identical to a
-    # normal close here.
-    header = f"{'Symbol':<8}{'Lado':<6}{'Cant.':>9}{'PnL':>10}{'Vía':>5}{'Fecha':>14}"
+    # fixed-width font makes columns line up. Date format "YYMMDD:HHMM"
+    # (2-digit year) per explicit request — no internal space (a space was
+    # the earlier wrap point on narrow phone screens, confirmed live; ":"
+    # doesn't trigger the same). "Cant." shows the real USDT margin
+    # committed (pre-leverage), not asset quantity. "Vía" tells a
+    # stop-loss-triggered close (fired directly on Binance, bypassing the
+    # bot's own close logic) apart from one the bot decided on itself.
+    header = f"{'Symbol':<8}{'Lado':<6}{'Cant.':>9}{'PnL':>10}{'Vía':>5}{'Fecha':>12}"
     rows = [header, "-" * len(header)]
     for t in trades:
         pnl_str = f"{t.realized_pnl:+.4f}" if t.realized_pnl is not None else "?"
-        date_str = t.closed_at.strftime("%Y%m%d:%H%M")
+        date_str = t.closed_at.strftime("%y%m%d:%H%M")
         base_symbol = t.symbol.split("/")[0]
         via_str = "SL" if t.closed_via == "stop_loss" else "bot"
+        margin_str = _fmt_num(t.margin) if t.margin is not None else "?"
         rows.append(
             f"{base_symbol:<8}{_fmt_side(t.position_side):<6}"
-            f"{_fmt_num(t.quantity):>9}{pnl_str:>10}{via_str:>5}{date_str:>14}"
+            f"{margin_str:>9}{pnl_str:>10}{via_str:>5}{date_str:>12}"
         )
     return "\n".join(rows)
 

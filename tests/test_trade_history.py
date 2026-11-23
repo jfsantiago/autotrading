@@ -38,11 +38,11 @@ def test_record_closed_trade_inserts_expected_row():
 
     query, params = cursor.execute.call_args.args
     assert "INSERT INTO closed_trades" in query
-    assert params == ("BTC/USDT", "long", 1.5, 50000.0, 51000.0, 1500.0, "bot")
+    assert params == ("BTC/USDT", "long", 1.5, 50000.0, 51000.0, 1500.0, "bot", None)
     conn.commit.assert_called_once()
 
 
-def test_record_closed_trade_accepts_stop_loss_closed_via():
+def test_record_closed_trade_accepts_stop_loss_closed_via_and_margin():
     cursor = MagicMock()
     conn = make_mock_conn(cursor)
 
@@ -56,17 +56,18 @@ def test_record_closed_trade_accepts_stop_loss_closed_via():
             exit_price=51000.0,
             realized_pnl=1500.0,
             closed_via="stop_loss",
+            margin=200.0,
         )
 
     _, params = cursor.execute.call_args.args
-    assert params == ("BTC/USDT", "long", 1.5, 50000.0, 51000.0, 1500.0, "stop_loss")
+    assert params == ("BTC/USDT", "long", 1.5, 50000.0, 51000.0, 1500.0, "stop_loss", 200.0)
 
 
 def test_fetch_recent_closed_trades_parses_rows():
     cursor = MagicMock()
     closed_at = datetime.now(timezone.utc)
     cursor.fetchall.return_value = [
-        ("BTC/USDT", "long", 1.5, 50000.0, 51000.0, 1500.0, "bot", closed_at)
+        ("BTC/USDT", "long", 1.5, 50000.0, 51000.0, 1500.0, "bot", 200.0, closed_at)
     ]
     conn = make_mock_conn(cursor)
 
@@ -80,4 +81,5 @@ def test_fetch_recent_closed_trades_parses_rows():
     assert trades[0].symbol == "BTC/USDT"
     assert trades[0].realized_pnl == 1500.0
     assert trades[0].closed_via == "bot"
+    assert trades[0].margin == 200.0
     assert trades[0].closed_at == closed_at
