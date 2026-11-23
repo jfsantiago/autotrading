@@ -4,14 +4,22 @@ import asyncio
 import logging
 from typing import Any
 
-from telegram import Bot, BotCommand, Update
+from telegram import Bot, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
-from telegram.ext import Application, CommandHandler, ContextTypes, filters
+from telegram.ext import (
+    Application,
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+    filters,
+)
 
-from autotrading import trade_history
-from autotrading.config import AppConfig
-from autotrading.execution.client import to_futures_symbol
-from autotrading.scheduling import fetch_bot_state
+from autotrading import position_tracking, trade_history
+from autotrading.config import AppConfig, assert_position_size_safe
+from autotrading.execution.client import assert_leverage_safe, to_futures_symbol
+from autotrading.execution.orders import close_position
+from autotrading.execution.positions import PositionSide, PositionState, get_position_state
+from autotrading.scheduling import fetch_bot_state, set_leverage, set_position_size_pct
 from autotrading.secrets import Secrets
 
 logger = logging.getLogger(__name__)
@@ -71,12 +79,17 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _guarded(update, secrets):
         return
     await update.message.reply_text(
-        "AutoTrading — bot de solo lectura\n\n"
+        "AutoTrading\n\n"
         "Toca el botón de menú (☰ junto al campo de texto) para ver los "
         "comandos disponibles:\n\n"
         "/positions — posiciones abiertas ahora\n"
         "/history — últimos cierres y su PnL\n"
-        "/status — estado del bot (encendido/apagado, intervalo)"
+        "/balance — saldo total de la cuenta\n"
+        "/close — cerrar una posición abierta manualmente\n"
+        "/status — estado del bot (encendido/apagado, intervalo)\n"
+        "/settings — apalancamiento y tamaño de posición actuales\n"
+        "/set_leverage — cambiar el apalancamiento\n"
+        "/set_risk — cambiar el tamaño de posición"
     )
 
 
@@ -136,6 +149,151 @@ async def cmd_positions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     )
 
 
+async def cmd_balance(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    secrets: Secrets = context.bot_data["secrets"]
+    if not await _guarded(update, secrets):
+        return
+
+    config: AppConfig = context.bot_data["config"]
+    client = context.bot_data["client"]
+    quote = config.futures.quote_currency
+    balance = client.fetch_balance().get(quote, {})
+
+    def fmt(key: str) -> str:
+        value = balance.get(key)
+        return _fmt_num(value) if value is not None else "?"
+
+    await update.message.reply_text(
+        f"Saldo total: {fmt('total')} {quote}\n"
+        f"Disponible: {fmt('free')} {quote}\n"
+        f"En uso (margen): {fmt('used')} {quote}"
+    )
+
+
+def _build_close_confirmation(position: PositionState) -> tuple[str, InlineKeyboardMarkup]:
+    base_symbol = position.symbol.split("/")[0]
+    text = (
+        f"¿Seguro que quieres cerrar {base_symbol} — {_fmt_side(position.side.value)}, "
+        f"{_fmt_num(position.size)}, entrada {_fmt_num(position.entry_price)}?\n"
+        "Esta acción no se puede deshacer."
+    )
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("Sí, cerrar", callback_data=f"close_confirm:{position.symbol}"),
+                InlineKeyboardButton("Cancelar", callback_data="close_cancel"),
+            ]
+        ]
+    )
+    return text, keyboard
+
+
+async def cmd_close(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    secrets: Secrets = context.bot_data["secrets"]
+    if not await _guarded(update, secrets):
+        return
+
+    config: AppConfig = context.bot_data["config"]
+    client = context.bot_data["client"]
+
+    if context.args:
+        arg = context.args[0].upper()
+        symbol = arg if "/" in arg else f"{arg}/{config.futures.quote_currency}"
+        if symbol not in config.all_symbols:
+            await update.message.reply_text(f"Símbolo no reconocido: {context.args[0]}")
+            return
+        position = get_position_state(client, symbol, config.futures.quote_currency)
+        if position.side == PositionSide.FLAT:
+            await update.message.reply_text(f"No hay posición abierta en {arg}.")
+            return
+        text, markup = _build_close_confirmation(position)
+        await update.message.reply_text(text, reply_markup=markup)
+        return
+
+    # No symbol given — list every open position as its own button, so
+    # there's nothing to type and no way to pick the wrong one.
+    positions = _fetch_open_positions_with_pnl(
+        client, config.all_symbols, config.futures.quote_currency
+    )
+    if not positions:
+        await update.message.reply_text("No hay posiciones abiertas.")
+        return
+
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    f"Cerrar {p['symbol'].split('/')[0]} — {_fmt_side(p['side'])}, "
+                    f"{_fmt_num(p['size'])}",
+                    callback_data=f"close_pick:{p['symbol']}",
+                )
+            ]
+            for p in positions
+        ]
+    )
+    await update.message.reply_text("¿Cuál posición quieres cerrar?", reply_markup=keyboard)
+
+
+async def on_close_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Single access-control layer for this handler — CallbackQueryHandler
+    has no filters.Chat() equivalent to pair with, unlike the CommandHandler
+    registrations, so _guarded() alone has to hold the line here.
+    """
+    secrets: Secrets = context.bot_data["secrets"]
+    if not await _guarded(update, secrets):
+        return
+
+    query = update.callback_query
+    await query.answer()
+
+    if query.data == "close_cancel":
+        await query.edit_message_text("Cancelado.")
+        return
+
+    action, _, symbol = query.data.partition(":")
+    config: AppConfig = context.bot_data["config"]
+    client = context.bot_data["client"]
+
+    # Re-check live state rather than trust what was shown when the button
+    # was first sent — it may have closed (stop-loss, or a second tap) in
+    # between.
+    position = get_position_state(client, symbol, config.futures.quote_currency)
+    if position.side == PositionSide.FLAT:
+        await query.edit_message_text(f"Ya no hay posición abierta en {symbol.split('/')[0]}.")
+        return
+
+    if action == "close_pick":
+        text, markup = _build_close_confirmation(position)
+        await query.edit_message_text(text, reply_markup=markup)
+        return
+
+    if action == "close_confirm":
+        try:
+            result = close_position(client, symbol, position, config.futures.quote_currency)
+            trade_history.record_closed_trade(
+                secrets,
+                symbol=symbol,
+                position_side=position.side.value,
+                quantity=position.size,
+                entry_price=position.entry_price,
+                exit_price=result.filled_price,
+                realized_pnl=result.realized_pnl,
+                closed_via="bot",
+            )
+            position_tracking.untrack_position(secrets, symbol)
+        except Exception as exc:
+            logger.warning("manual close failed for %s", symbol, exc_info=True)
+            await query.edit_message_text(f"ORDEN FALLÓ — {symbol.split('/')[0]}: {exc}")
+            return
+
+        pnl = result.realized_pnl
+        pnl_str = f"{pnl:+.4f}" if pnl is not None else "?"
+        price_str = _fmt_num(result.filled_price) if result.filled_price is not None else "?"
+        await query.edit_message_text(
+            f"Cerrado {symbol.split('/')[0]} @ {price_str}\nPnL: {pnl_str}"
+        )
+
+
 def _format_trades_table(trades: list) -> str:
     # Monospace table via <pre> — Telegram has no native table widget, but a
     # fixed-width font makes columns line up. Kept to the essential columns
@@ -191,6 +349,90 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     )
 
 
+async def cmd_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    secrets: Secrets = context.bot_data["secrets"]
+    if not await _guarded(update, secrets):
+        return
+
+    config: AppConfig = context.bot_data["config"]
+    state = fetch_bot_state(secrets)
+
+    if state.leverage is not None:
+        leverage_line = f"Apalancamiento: {state.leverage}x (override activo)"
+    else:
+        leverage_line = f"Apalancamiento: {config.futures.leverage}x (valor del YAML, sin override)"
+
+    if state.position_size_pct is not None:
+        risk_line = f"Tamaño de posición: {state.position_size_pct * 100:.1f}% (override activo)"
+    else:
+        risk_line = (
+            f"Tamaño de posición: {config.risk.position_size_pct * 100:.1f}% "
+            "(valor del YAML, sin override)"
+        )
+
+    await update.message.reply_text(f"{leverage_line}\n{risk_line}")
+
+
+async def cmd_set_leverage(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    secrets: Secrets = context.bot_data["secrets"]
+    if not await _guarded(update, secrets):
+        return
+
+    if not context.args:
+        await update.message.reply_text("Uso: /set_leverage <1-10> o /set_leverage default")
+        return
+
+    arg = context.args[0].lower()
+    if arg == "default":
+        set_leverage(secrets, None)
+        await update.message.reply_text("Apalancamiento: override eliminado, vuelve a usar el YAML.")
+        return
+
+    try:
+        value = int(arg)
+        assert_leverage_safe(value)
+    except ValueError as exc:
+        await update.message.reply_text(f"Valor inválido: {exc}")
+        return
+
+    set_leverage(secrets, value)
+    await update.message.reply_text(
+        f"Apalancamiento actualizado a {value}x. Se aplicará a la próxima posición que se "
+        "abra (no afecta una posición ya abierta)."
+    )
+
+
+async def cmd_set_risk(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    secrets: Secrets = context.bot_data["secrets"]
+    if not await _guarded(update, secrets):
+        return
+
+    if not context.args:
+        await update.message.reply_text("Uso: /set_risk <porcentaje, ej. 4> o /set_risk default")
+        return
+
+    arg = context.args[0].lower()
+    if arg == "default":
+        set_position_size_pct(secrets, None)
+        await update.message.reply_text(
+            "Tamaño de posición: override eliminado, vuelve a usar el YAML."
+        )
+        return
+
+    try:
+        value = float(arg) / 100
+        assert_position_size_safe(value)
+    except ValueError as exc:
+        await update.message.reply_text(f"Valor inválido: {exc}")
+        return
+
+    set_position_size_pct(secrets, value)
+    await update.message.reply_text(
+        f"Tamaño de posición actualizado a {value * 100:.1f}%. Se aplicará a la próxima "
+        "posición que se abra."
+    )
+
+
 async def _set_command_menu(application: Application) -> None:
     """Populates Telegram's native "/" command menu — a single button next
     to the message box that expands into the full command list, instead of
@@ -200,7 +442,12 @@ async def _set_command_menu(application: Application) -> None:
         [
             BotCommand("positions", "Posiciones abiertas ahora"),
             BotCommand("history", "Últimos cierres y su PnL"),
+            BotCommand("balance", "Saldo total de la cuenta"),
+            BotCommand("close", "Cerrar una posición abierta"),
             BotCommand("status", "Estado del bot"),
+            BotCommand("settings", "Apalancamiento y tamaño de posición"),
+            BotCommand("set_leverage", "Cambiar el apalancamiento"),
+            BotCommand("set_risk", "Cambiar el tamaño de posición"),
             BotCommand("start", "Mostrar el menú de botones"),
         ]
     )
@@ -243,7 +490,13 @@ def run(config: AppConfig, secrets: Secrets, client: Any) -> None:
     application.add_handler(CommandHandler(["start", "help"], cmd_start, filters=auth_filter))
     application.add_handler(CommandHandler("positions", cmd_positions, filters=auth_filter))
     application.add_handler(CommandHandler("history", cmd_history, filters=auth_filter))
+    application.add_handler(CommandHandler("balance", cmd_balance, filters=auth_filter))
+    application.add_handler(CommandHandler("close", cmd_close, filters=auth_filter))
     application.add_handler(CommandHandler("status", cmd_status, filters=auth_filter))
+    application.add_handler(CommandHandler("settings", cmd_settings, filters=auth_filter))
+    application.add_handler(CommandHandler("set_leverage", cmd_set_leverage, filters=auth_filter))
+    application.add_handler(CommandHandler("set_risk", cmd_set_risk, filters=auth_filter))
+    application.add_handler(CallbackQueryHandler(on_close_callback, pattern=r"^close_"))
 
     logger.info("Telegram bot starting (long polling)")
     application.run_polling()

@@ -28,6 +28,13 @@ create table if not exists bot_state (
     constraint bot_state_singleton check (id = 1)
 );
 
+-- `create table if not exists` is a no-op for the already-existing table —
+-- explicit ALTERs needed too, same pitfall as closed_trades.closed_via
+-- below. NULL means "no override, use the YAML/env-var value" — these are
+-- the Telegram-adjustable risk knobs (/settings, /set_leverage, /set_risk).
+alter table bot_state add column if not exists leverage int;
+alter table bot_state add column if not exists position_size_pct double precision;
+
 -- Closed-trade history — one row per position close, inserted at the
 -- orchestration layer (cli.py::run_trade_command, right after a
 -- CLOSE_LONG/CLOSE_SHORT order executes) — not inside execution/orders.py,

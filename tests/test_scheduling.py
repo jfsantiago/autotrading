@@ -7,6 +7,8 @@ from autotrading.scheduling import (
     fetch_bot_state,
     is_due,
     mark_run_completed,
+    set_leverage,
+    set_position_size_pct,
 )
 from autotrading.secrets import Secrets
 
@@ -66,7 +68,7 @@ def test_ensure_bot_state_row_issues_insert_on_conflict_do_nothing():
 def test_fetch_bot_state_parses_row():
     cursor = MagicMock()
     last_run = datetime.now(timezone.utc)
-    cursor.fetchone.return_value = (True, 45, last_run)
+    cursor.fetchone.return_value = (True, 45, last_run, 7, 0.1)
     conn = make_mock_conn(cursor)
 
     with patch("autotrading.scheduling.psycopg2.connect", return_value=conn):
@@ -75,6 +77,20 @@ def test_fetch_bot_state_parses_row():
     assert state.bot_enabled is True
     assert state.run_interval_minutes == 45
     assert state.last_run_at == last_run
+    assert state.leverage == 7
+    assert state.position_size_pct == 0.1
+
+
+def test_fetch_bot_state_leverage_and_risk_default_to_none():
+    cursor = MagicMock()
+    cursor.fetchone.return_value = (True, 60, None, None, None)
+    conn = make_mock_conn(cursor)
+
+    with patch("autotrading.scheduling.psycopg2.connect", return_value=conn):
+        state = fetch_bot_state(make_secrets())
+
+    assert state.leverage is None
+    assert state.position_size_pct is None
 
 
 def test_mark_run_completed_updates_last_run_at():
@@ -88,4 +104,41 @@ def test_mark_run_completed_updates_last_run_at():
     query, params = cursor.execute.call_args.args
     assert "UPDATE bot_state" in query
     assert params[0] == when
+    conn.commit.assert_called_once()
+
+
+def test_set_leverage_updates_column():
+    cursor = MagicMock()
+    conn = make_mock_conn(cursor)
+
+    with patch("autotrading.scheduling.psycopg2.connect", return_value=conn):
+        set_leverage(make_secrets(), 7)
+
+    query, params = cursor.execute.call_args.args
+    assert "UPDATE bot_state" in query and "leverage" in query
+    assert params == (7, 1)
+    conn.commit.assert_called_once()
+
+
+def test_set_leverage_can_clear_override_with_none():
+    cursor = MagicMock()
+    conn = make_mock_conn(cursor)
+
+    with patch("autotrading.scheduling.psycopg2.connect", return_value=conn):
+        set_leverage(make_secrets(), None)
+
+    _, params = cursor.execute.call_args.args
+    assert params[0] is None
+
+
+def test_set_position_size_pct_updates_column():
+    cursor = MagicMock()
+    conn = make_mock_conn(cursor)
+
+    with patch("autotrading.scheduling.psycopg2.connect", return_value=conn):
+        set_position_size_pct(make_secrets(), 0.1)
+
+    query, params = cursor.execute.call_args.args
+    assert "UPDATE bot_state" in query and "position_size_pct" in query
+    assert params == (0.1, 1)
     conn.commit.assert_called_once()

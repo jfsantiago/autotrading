@@ -321,6 +321,17 @@ def run_trade_command(args: argparse.Namespace) -> int:
         return loaded
     config, secrets = loaded
 
+    # Telegram-adjustable overrides (/set_leverage, /set_risk) — NULL in
+    # bot_state means "no override", keeping today's YAML/env behavior.
+    # Applied here (not inside load_config) so config.py stays free of any
+    # Supabase/secrets knowledge, same separation as everywhere else.
+    ensure_bot_state_row(secrets)
+    state = fetch_bot_state(secrets)
+    if state.leverage is not None:
+        config.futures.leverage = state.leverage
+    if state.position_size_pct is not None:
+        config.risk.position_size_pct = state.position_size_pct
+
     try:
         assert_leverage_safe(config.futures.leverage)
         assert_position_size_safe(config.risk.position_size_pct)

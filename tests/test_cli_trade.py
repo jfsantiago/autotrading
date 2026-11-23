@@ -9,6 +9,7 @@ from autotrading.execution.orders import OrderResult
 from autotrading.execution.positions import PositionSide, PositionState
 from autotrading.news.pipeline import NewsSnapshot
 from autotrading.position_tracking import TrackedPosition
+from autotrading.scheduling import BotState
 from autotrading.secrets import Secrets
 from autotrading.strategies.base import Signal
 
@@ -59,12 +60,17 @@ def common_patches(tmp_path, flat_position=True):
         patch("autotrading.cli.fetch_all_tracked_positions", return_value={}),
         patch("autotrading.cli.track_open_position"),
         patch("autotrading.cli.untrack_position"),
+        patch("autotrading.cli.ensure_bot_state_row"),
+        patch(
+            "autotrading.cli.fetch_bot_state",
+            return_value=BotState(bot_enabled=True, run_interval_minutes=60, last_run_at=None),
+        ),
     ]
 
 
 def test_trade_without_confirm_never_places_orders(tmp_path):
     patches = common_patches(tmp_path, flat_position=True)
-    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6], patches[7], patches[8], patches[9]:
+    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6], patches[7], patches[8], patches[9], patches[10], patches[11]:
         with patch("autotrading.cli.open_long") as mock_open_long:
             exit_code = main(["trade", "--config", "fake.yaml", "--output", str(tmp_path)])
             mock_open_long.assert_not_called()
@@ -79,7 +85,7 @@ def test_trade_with_confirm_opens_long(tmp_path):
         symbol="BTC/USDT", action="open_long", entry_order={"id": "1"}, stop_order={"id": "2"},
         filled_quantity=1.0, filled_price=100.0,
     )
-    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6], patches[7], patches[8], patches[9]:
+    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6], patches[7], patches[8], patches[9], patches[10], patches[11]:
         with patch("autotrading.cli.open_long", return_value=fake_result) as mock_open_long:
             with patch(
                 "autotrading.cli.make_futures_demo_client"
@@ -101,7 +107,7 @@ def test_trade_with_confirm_closes_long_records_history(tmp_path):
         symbol="BTC/USDT", action="close", entry_order={"id": "3"}, stop_order=None,
         filled_quantity=1.0, filled_price=105.0, realized_pnl=5.0,
     )
-    with patches[0], patches[1], patches[2], patches[3], patches[5], patches[6], patches[7], patches[8], patches[9]:
+    with patches[0], patches[1], patches[2], patches[3], patches[5], patches[6], patches[7], patches[8], patches[9], patches[10], patches[11]:
         with patch("autotrading.cli.get_latest_signal", return_value=(Signal.SELL, pd.DataFrame({"close": [105.0]}))):
             with patch("autotrading.cli.close_position", return_value=fake_result) as mock_close:
                 with patch(
@@ -129,7 +135,7 @@ def test_trade_with_confirm_closes_long_records_history(tmp_path):
 
 def test_trade_already_long_is_noop_even_with_confirm(tmp_path):
     patches = common_patches(tmp_path, flat_position=False)
-    with patches[0], patches[1], patches[2], patches[3], patches[5], patches[6], patches[7], patches[8], patches[9]:
+    with patches[0], patches[1], patches[2], patches[3], patches[5], patches[6], patches[7], patches[8], patches[9], patches[10], patches[11]:
         with patch("autotrading.cli.make_futures_demo_client") as mock_make_client:
             mock_make_client.return_value.fetch_balance.return_value = {"USDT": {"total": 1000.0}}
             with patch("autotrading.cli.open_long") as mock_open_long, patch(
@@ -142,6 +148,49 @@ def test_trade_already_long_is_noop_even_with_confirm(tmp_path):
                 mock_close.assert_not_called()
 
     assert exit_code == 0
+
+
+def test_trade_applies_bot_state_leverage_and_risk_overrides(tmp_path):
+    patches = common_patches(tmp_path, flat_position=True)
+    override_state = BotState(
+        bot_enabled=True, run_interval_minutes=60, last_run_at=None,
+        leverage=7, position_size_pct=0.1,
+    )
+    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6], \
+         patches[7], patches[8], patches[9], patches[10]:
+        with patch("autotrading.cli.fetch_bot_state", return_value=override_state):
+            with patch("autotrading.cli.open_long") as mock_open_long, patch(
+                "autotrading.cli.calculate_position_size"
+            ) as mock_calc_size:
+                mock_calc_size.return_value = 1.0
+                with patch(
+                    "autotrading.cli.make_futures_demo_client"
+                ) as mock_make_client:
+                    mock_make_client.return_value.fetch_balance.return_value = {
+                        "USDT": {"total": 1000.0}
+                    }
+                    main(["trade", "--config", "fake.yaml", "--confirm", "--output", str(tmp_path)])
+
+                mock_open_long.assert_called_once()
+                assert mock_open_long.call_args.args[3] == 7  # leverage override applied
+                assert mock_calc_size.call_args.args[2] == 7
+
+    assert mock_calc_size.call_args.args[3].position_size_pct == 0.1
+
+
+def test_trade_rejects_unsafe_leverage_override_from_bot_state(tmp_path):
+    patches = common_patches(tmp_path, flat_position=True)
+    unsafe_state = BotState(
+        bot_enabled=True, run_interval_minutes=60, last_run_at=None, leverage=50,
+    )
+    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6], \
+         patches[7], patches[8], patches[9], patches[10]:
+        with patch("autotrading.cli.fetch_bot_state", return_value=unsafe_state):
+            exit_code = main(
+                ["trade", "--config", "fake.yaml", "--confirm", "--output", str(tmp_path)]
+            )
+
+    assert exit_code == 1
 
 
 def test_trade_errors_without_news_config():
