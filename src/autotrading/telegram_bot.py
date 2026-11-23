@@ -224,9 +224,10 @@ async def cmd_balance(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 def _build_close_confirmation(position: PositionState) -> tuple[str, InlineKeyboardMarkup]:
     base_symbol = position.symbol.split("/")[0]
+    pnl = position.unrealized_pnl
+    pnl_str = f"{pnl:+.4f}" if pnl is not None else "?"
     text = (
-        f"¿Seguro que quieres cerrar {base_symbol} — {_fmt_side(position.side.value)}, "
-        f"{_fmt_num(position.size)}, entrada {_fmt_num(position.entry_price)}?\n"
+        f"¿Seguro que quieres cerrar {base_symbol}? PnL actual: {pnl_str}\n"
         "Esta acción no se puede deshacer."
     )
     keyboard = InlineKeyboardMarkup(

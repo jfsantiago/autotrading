@@ -20,6 +20,7 @@ class PositionState:
     size: float  # 0.0 if flat
     entry_price: float | None
     margin: float | None = None  # real USDT committed (pre-leverage), from Binance
+    unrealized_pnl: float | None = None  # floating PnL if closed right now, from Binance
 
 
 def get_position_state(
@@ -46,6 +47,7 @@ def get_position_state(
             size=abs(contracts),
             entry_price=position.get("entryPrice"),
             margin=position.get("initialMargin"),
+            unrealized_pnl=position.get("unrealizedPnl"),
         )
 
     return PositionState(symbol=symbol, side=PositionSide.FLAT, size=0.0, entry_price=None)

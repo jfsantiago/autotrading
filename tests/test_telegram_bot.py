@@ -397,7 +397,10 @@ def test_cmd_close_no_args_no_open_positions():
 def test_cmd_close_with_symbol_arg_shows_confirmation_directly():
     secrets = make_secrets()
     config = make_config()
-    position = PositionState(symbol="BTC/USDT", side=PositionSide.LONG, size=1.5, entry_price=50000.0)
+    position = PositionState(
+        symbol="BTC/USDT", side=PositionSide.LONG, size=1.5, entry_price=50000.0,
+        unrealized_pnl=25.0,
+    )
     client = MagicMock()
     update = make_update(chat_id=AUTHORIZED_CHAT_ID)
     context = make_context(args=["BTC"], secrets=secrets, config=config, client=client)
@@ -407,7 +410,7 @@ def test_cmd_close_with_symbol_arg_shows_confirmation_directly():
 
     text = update.message.reply_text.call_args.args[0]
     markup = update.message.reply_text.call_args.kwargs["reply_markup"]
-    assert "BTC" in text and "buy" in text
+    assert "BTC" in text and "+25.0000" in text
     assert markup.inline_keyboard[0][0].callback_data == "close_confirm:BTC/USDT"
 
 
@@ -449,7 +452,10 @@ def test_on_close_callback_cancel():
 def test_on_close_callback_pick_shows_confirmation():
     secrets = make_secrets()
     config = make_config()
-    position = PositionState(symbol="BTC/USDT", side=PositionSide.LONG, size=1.5, entry_price=50000.0)
+    position = PositionState(
+        symbol="BTC/USDT", side=PositionSide.LONG, size=1.5, entry_price=50000.0,
+        unrealized_pnl=-12.5,
+    )
     client = MagicMock()
     update = make_callback_update(chat_id=AUTHORIZED_CHAT_ID, data="close_pick:BTC/USDT")
     context = make_context(secrets=secrets, config=config, client=client)
@@ -459,6 +465,9 @@ def test_on_close_callback_pick_shows_confirmation():
 
     text = update.callback_query.edit_message_text.call_args.args[0]
     assert "BTC" in text and "Esta acción no se puede deshacer" in text
+    assert "-12.5000" in text
+    # The old long/size/entry details are gone — just symbol + PnL now.
+    assert "50000" not in text
 
 
 def test_on_close_callback_confirm_already_flat():
