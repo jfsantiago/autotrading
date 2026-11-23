@@ -1,5 +1,5 @@
 [Unit]
-Description=AutoTrading Telegram control bot (read-only reporting)
+Description=AutoTrading Telegram bot (reporting + manual control)
 After=network-online.target
 Wants=network-online.target
 
