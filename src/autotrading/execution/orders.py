@@ -117,7 +117,7 @@ def open_short(
     )
 
 
-def _fetch_realized_pnl(client: Any, futures_symbol: str, since_ms: int) -> float | None:
+def fetch_realized_pnl(client: Any, futures_symbol: str, since_ms: int) -> float | None:
     """Binance's own booked realized PnL for this close (already nets out
     fees as Binance accounts for them) — more trustworthy than computing
     (exit - entry) * qty ourselves. One immediate query + one short retry:
@@ -184,7 +184,7 @@ def close_position(
     # like a failure to the caller — realized_pnl simply stays None (honest
     # "unknown" rather than a misleading 0.0 that looks like break-even).
     since_ms = int(filled_order.get("timestamp") or 0) - 5000
-    realized_pnl = _fetch_realized_pnl(client, futures_symbol, since_ms)
+    realized_pnl = fetch_realized_pnl(client, futures_symbol, since_ms)
 
     return OrderResult(
         symbol=symbol,

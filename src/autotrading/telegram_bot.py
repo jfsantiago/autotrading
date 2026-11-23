@@ -115,15 +115,20 @@ async def cmd_positions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await update.message.reply_text("Sin posiciones abiertas ahora mismo.")
         return
 
-    header = f"{'Symbol':<8}{'Lado':<6}{'Cant.':>9}{'Entrada':>10}{'PnL':>10}"
+    # "Valor" (= Cant. x Entrada, the leveraged notional in USD) makes the
+    # actual exposure legible at a glance — "Cant." alone is an asset
+    # quantity (e.g. "0.015" BTC), easy to mistake for the margin at risk
+    # when it's really that amount multiplied by leverage.
+    header = f"{'Symbol':<8}{'Lado':<6}{'Cant.':>9}{'Valor':>10}{'Entrada':>10}{'PnL':>10}"
     rows = [header, "-" * len(header)]
     for p in positions:
         pnl = p["unrealized_pnl"]
         pnl_str = f"{pnl:+.4f}" if pnl is not None else "?"
         base_symbol = p["symbol"].split("/")[0]
+        notional = p["size"] * p["entry_price"]
         rows.append(
             f"{base_symbol:<8}{_fmt_side(p['side']):<6}{_fmt_num(p['size']):>9}"
-            f"{_fmt_num(p['entry_price']):>10}{pnl_str:>10}"
+            f"{_fmt_num(notional):>10}{_fmt_num(p['entry_price']):>10}{pnl_str:>10}"
         )
     table = "\n".join(rows)
     await update.message.reply_text(
@@ -137,15 +142,20 @@ def _format_trades_table(trades: list) -> str:
     # (entry/exit price dropped). Date format "YYYYMMDD:HHMM" per explicit
     # request — no internal space (a space was the earlier wrap point on
     # narrow phone screens, confirmed live; ":" doesn't trigger the same).
-    header = f"{'Symbol':<8}{'Lado':<6}{'Cant.':>9}{'PnL':>10}{'Fecha':>14}"
+    # "Vía" tells a stop-loss-triggered close (fired directly on Binance,
+    # bypassing the bot's own close logic) apart from one the bot decided
+    # on itself — otherwise a surprise stop-loss would look identical to a
+    # normal close here.
+    header = f"{'Symbol':<8}{'Lado':<6}{'Cant.':>9}{'PnL':>10}{'Vía':>5}{'Fecha':>14}"
     rows = [header, "-" * len(header)]
     for t in trades:
         pnl_str = f"{t.realized_pnl:+.4f}" if t.realized_pnl is not None else "?"
         date_str = t.closed_at.strftime("%Y%m%d:%H%M")
         base_symbol = t.symbol.split("/")[0]
+        via_str = "SL" if t.closed_via == "stop_loss" else "bot"
         rows.append(
             f"{base_symbol:<8}{_fmt_side(t.position_side):<6}"
-            f"{_fmt_num(t.quantity):>9}{pnl_str:>10}{date_str:>14}"
+            f"{_fmt_num(t.quantity):>9}{pnl_str:>10}{via_str:>5}{date_str:>14}"
         )
     return "\n".join(rows)
 

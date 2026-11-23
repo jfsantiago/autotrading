@@ -96,6 +96,7 @@ def test_cmd_positions_shows_open_positions_with_unrealized_pnl():
     text = update.message.reply_text.call_args.args[0]
     assert "BTC" in text  # base ticker only, "/USDT" dropped for table width
     assert "50000" in text  # not scientific notation ("5e+04")
+    assert "75000" in text  # Valor = Cant. x Entrada = 1.5 * 50000
     assert "25" in text
 
 
@@ -127,6 +128,7 @@ def test_cmd_history_shows_recent_trades():
         entry_price=100.0,
         exit_price=110.0,
         realized_pnl=10.0,
+        closed_via="bot",
         closed_at=datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc),
     )
 
@@ -141,6 +143,33 @@ def test_cmd_history_shows_recent_trades():
     assert "10.0" in text or "+10.0000" in text
     assert "20260101:1200" in text  # date format "YYYYMMDD:HHMM"
     assert "largo" in text  # "long" translated for display
+    assert "bot" in text  # closed_via == "bot" shown in the "Vía" column
+
+
+def test_cmd_history_marks_stop_loss_closes_distinctly():
+    secrets = make_secrets()
+    update = make_update(chat_id=AUTHORIZED_CHAT_ID)
+    context = make_context(secrets=secrets)
+
+    trade = ClosedTrade(
+        symbol="BTC/USDT",
+        position_side="long",
+        quantity=1.0,
+        entry_price=100.0,
+        exit_price=97.0,
+        realized_pnl=-3.0,
+        closed_via="stop_loss",
+        closed_at=datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc),
+    )
+
+    with patch(
+        "autotrading.telegram_bot.trade_history.fetch_recent_closed_trades",
+        return_value=[trade],
+    ):
+        asyncio.run(cmd_history(update, context))
+
+    text = update.message.reply_text.call_args.args[0]
+    assert "SL" in text
 
 
 def test_cmd_history_handles_no_trades():

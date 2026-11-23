@@ -3,8 +3,8 @@ from unittest.mock import MagicMock, call, patch
 import pytest
 
 from autotrading.execution.orders import (
-    _fetch_realized_pnl,
     close_position,
+    fetch_realized_pnl,
     open_long,
     open_short,
     prepare_symbol_for_trading,
@@ -124,7 +124,7 @@ def test_fetch_realized_pnl_sums_multiple_entries():
         return_value=[{"income": "12.5"}, {"income": "-0.3"}]
     )
 
-    result = _fetch_realized_pnl(client, "BTC/USDT:USDT", since_ms=1_700_000_000_000)
+    result = fetch_realized_pnl(client, "BTC/USDT:USDT", since_ms=1_700_000_000_000)
 
     assert result == pytest.approx(12.2)
     client.market_id.assert_called_once_with("BTC/USDT:USDT")
@@ -143,7 +143,7 @@ def test_fetch_realized_pnl_retries_once_then_returns_none(monkeypatch):
     client = MagicMock()
     client.fapiPrivateGetIncome = MagicMock(return_value=[])
 
-    result = _fetch_realized_pnl(client, "BTC/USDT:USDT", since_ms=1_700_000_000_000)
+    result = fetch_realized_pnl(client, "BTC/USDT:USDT", since_ms=1_700_000_000_000)
 
     assert result is None
     assert client.fapiPrivateGetIncome.call_count == 2
@@ -153,6 +153,6 @@ def test_fetch_realized_pnl_returns_none_on_exception():
     client = MagicMock()
     client.fapiPrivateGetIncome = MagicMock(side_effect=Exception("boom"))
 
-    result = _fetch_realized_pnl(client, "BTC/USDT:USDT", since_ms=1_700_000_000_000)
+    result = fetch_realized_pnl(client, "BTC/USDT:USDT", since_ms=1_700_000_000_000)
 
     assert result is None

@@ -1,6 +1,6 @@
 -- Run this once by hand in the Supabase SQL editor (Project -> SQL Editor)
 -- before the first real run of `autotrading news`, `decide`, `trade`,
--- `scheduled-run`, or `telegram-bot`. Not applied automatically — three
+-- `scheduled-run`, or `telegram-bot`. Not applied automatically — four
 -- tables don't justify a migrations framework for a solo project.
 
 -- Permanent LLM classification cache, shared between the scheduled VPS
@@ -45,3 +45,23 @@ create table if not exists closed_trades (
     closed_at      timestamptz not null default now()
 );
 create index if not exists closed_trades_closed_at_idx on closed_trades (closed_at desc);
+
+-- `create table if not exists` above is a no-op once the table already
+-- exists in production, so new columns need an explicit ALTER — this ran
+-- once by hand against the live table in addition to the CREATE above.
+alter table closed_trades add column if not exists
+    closed_via text not null default 'bot' check (closed_via in ('bot', 'stop_loss'));
+
+-- Tracks positions WE opened (symbol, side, qty, entry) so a scheduled
+-- review can notice when Binance shows a symbol as flat that we still
+-- think is open — meaning the exchange's own stop-loss (or something
+-- external) closed it, not our code. One row per currently-open position
+-- we're aware of; deleted once that position is confirmed closed (by us
+-- or detected as stop-loss-closed).
+create table if not exists open_position_tracking (
+    symbol        text primary key,
+    position_side text not null check (position_side in ('long', 'short')),
+    quantity      double precision not null,
+    entry_price   double precision not null,
+    opened_at     timestamptz not null default now()
+);
