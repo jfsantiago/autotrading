@@ -62,7 +62,17 @@ create index if not exists closed_trades_closed_at_idx on closed_trades (closed_
 -- exists in production, so new columns need an explicit ALTER — this ran
 -- once by hand against the live table in addition to the CREATE above.
 alter table closed_trades add column if not exists
-    closed_via text not null default 'bot' check (closed_via in ('bot', 'stop_loss'));
+    closed_via text not null default 'bot' check (closed_via in ('bot', 'stop_loss', 'take_profit'));
+
+-- 'take_profit' added after the fact (the CHECK above only applies to a
+-- fresh install) — a close detected externally (not via our own
+-- close_position call) couldn't previously say whether the stop-loss or
+-- the take-profit order fired; now a positive realized PnL labels it
+-- take_profit instead of lumping every externally-triggered close under
+-- stop_loss regardless of whether it was a win or a loss.
+alter table closed_trades drop constraint if exists closed_trades_closed_via_check;
+alter table closed_trades add constraint closed_trades_closed_via_check
+    check (closed_via in ('bot', 'stop_loss', 'take_profit'));
 
 -- Real USDT margin committed to the trade (pre-leverage capital at risk),
 -- captured at open time via open_position_tracking.margin — nullable since

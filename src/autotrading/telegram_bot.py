@@ -366,7 +366,7 @@ def _format_trades_table(trades: list) -> str:
         pnl_str = f"{t.realized_pnl:+.4f}" if t.realized_pnl is not None else "?"
         date_str = t.closed_at.strftime("%y%m%d:%H%M")
         base_symbol = t.symbol.split("/")[0]
-        via_str = "SL" if t.closed_via == "stop_loss" else "bot"
+        via_str = {"stop_loss": "SL", "take_profit": "TP"}.get(t.closed_via, "bot")
         margin_str = _fmt_num(t.margin) if t.margin is not None else "?"
         rows.append(
             f"{base_symbol:<8}{_fmt_side(t.position_side):<6}"

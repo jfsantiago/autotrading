@@ -268,6 +268,33 @@ def test_cmd_history_marks_stop_loss_closes_distinctly():
     assert "SL" in text
 
 
+def test_cmd_history_marks_take_profit_closes_distinctly():
+    secrets = make_secrets()
+    update = make_update(chat_id=AUTHORIZED_CHAT_ID)
+    context = make_context(secrets=secrets)
+
+    trade = ClosedTrade(
+        symbol="BTC/USDT",
+        position_side="long",
+        quantity=1.0,
+        entry_price=100.0,
+        exit_price=106.0,
+        realized_pnl=6.0,
+        closed_via="take_profit",
+        margin=100.0,
+        closed_at=datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc),
+    )
+
+    with patch(
+        "autotrading.telegram_bot.trade_history.fetch_recent_closed_trades",
+        return_value=[trade],
+    ):
+        asyncio.run(cmd_history(update, context))
+
+    text = update.message.reply_text.call_args.args[0]
+    assert "TP" in text
+
+
 def test_cmd_history_handles_no_trades():
     secrets = make_secrets()
     update = make_update(chat_id=AUTHORIZED_CHAT_ID)

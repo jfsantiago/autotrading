@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from autotrading.cli import _notify_review_summary, _reconcile_stop_loss_closes, main
+from autotrading.cli import _notify_review_summary, _reconcile_external_closes, main
 from autotrading.execution.orders import OrderResult
 from autotrading.execution.positions import PositionSide, PositionState
 from autotrading.news.pipeline import NewsSnapshot
@@ -235,7 +235,7 @@ def test_reconcile_skips_when_still_open_and_already_tracked():
          patch("autotrading.cli.track_open_position") as mock_track, \
          patch("autotrading.cli.record_closed_trade") as mock_record, \
          patch("autotrading.cli.untrack_position") as mock_untrack:
-        _reconcile_stop_loss_closes(
+        _reconcile_external_closes(
             make_fake_secrets(), object(), make_fake_config(), ["BTC/USDT"], {"BTC/USDT": position}
         )
     mock_track.assert_not_called()
@@ -247,7 +247,7 @@ def test_reconcile_self_heals_untracked_open_position():
     position = PositionState(symbol="BTC/USDT", side=PositionSide.LONG, size=1.0, entry_price=100.0)
     with patch("autotrading.cli.fetch_all_tracked_positions", return_value={}), \
          patch("autotrading.cli.track_open_position") as mock_track:
-        _reconcile_stop_loss_closes(
+        _reconcile_external_closes(
             make_fake_secrets(), object(), make_fake_config(), ["BTC/USDT"], {"BTC/USDT": position}
         )
     mock_track.assert_called_once_with(
@@ -260,7 +260,7 @@ def test_reconcile_skips_flat_untracked_symbol():
     position = PositionState(symbol="BTC/USDT", side=PositionSide.FLAT, size=0.0, entry_price=None)
     with patch("autotrading.cli.fetch_all_tracked_positions", return_value={}), \
          patch("autotrading.cli.fetch_realized_pnl") as mock_fetch_pnl:
-        _reconcile_stop_loss_closes(
+        _reconcile_external_closes(
             make_fake_secrets(), object(), make_fake_config(), ["BTC/USDT"], {"BTC/USDT": position}
         )
     mock_fetch_pnl.assert_not_called()
@@ -273,22 +273,43 @@ def test_reconcile_records_stop_loss_close_when_tracked_long_now_flat():
         margin=50.0, opened_at=datetime.now(timezone.utc),
     )
     with patch("autotrading.cli.fetch_all_tracked_positions", return_value={"BTC/USDT": tracked}), \
-         patch("autotrading.cli.fetch_realized_pnl", return_value=10.0), \
+         patch("autotrading.cli.fetch_realized_pnl", return_value=-10.0), \
          patch("autotrading.cli.record_closed_trade") as mock_record, \
          patch("autotrading.cli.untrack_position") as mock_untrack, \
          patch("autotrading.cli.notify_telegram") as mock_notify:
-        _reconcile_stop_loss_closes(
+        _reconcile_external_closes(
             make_fake_secrets(), object(), make_fake_config(), ["BTC/USDT"], {"BTC/USDT": position}
         )
 
     mock_record.assert_called_once_with(
         make_fake_secrets(), symbol="BTC/USDT", position_side="long", quantity=2.0,
-        entry_price=100.0, exit_price=105.0, realized_pnl=10.0, closed_via="stop_loss",
+        entry_price=100.0, exit_price=95.0, realized_pnl=-10.0, closed_via="stop_loss",
         margin=50.0,
     )
     mock_untrack.assert_called_once_with(make_fake_secrets(), "BTC/USDT")
     mock_notify.assert_called_once()
     assert "STOP-LOSS" in mock_notify.call_args.args[1]
+
+
+def test_reconcile_records_take_profit_close_when_pnl_positive():
+    # Same external-close path, but a positive realized PnL means the
+    # take-profit side of the bracket is the one credited, not the stop.
+    position = PositionState(symbol="BTC/USDT", side=PositionSide.FLAT, size=0.0, entry_price=None)
+    tracked = TrackedPosition(
+        symbol="BTC/USDT", position_side="long", quantity=2.0, entry_price=100.0,
+        margin=50.0, opened_at=datetime.now(timezone.utc),
+    )
+    with patch("autotrading.cli.fetch_all_tracked_positions", return_value={"BTC/USDT": tracked}), \
+         patch("autotrading.cli.fetch_realized_pnl", return_value=10.0), \
+         patch("autotrading.cli.record_closed_trade") as mock_record, \
+         patch("autotrading.cli.untrack_position"), \
+         patch("autotrading.cli.notify_telegram") as mock_notify:
+        _reconcile_external_closes(
+            make_fake_secrets(), object(), make_fake_config(), ["BTC/USDT"], {"BTC/USDT": position}
+        )
+
+    assert mock_record.call_args.kwargs["closed_via"] == "take_profit"
+    assert "TAKE-PROFIT" in mock_notify.call_args.args[1]
 
 
 def test_reconcile_records_stop_loss_close_for_short():
@@ -298,15 +319,16 @@ def test_reconcile_records_stop_loss_close_for_short():
         margin=50.0, opened_at=datetime.now(timezone.utc),
     )
     with patch("autotrading.cli.fetch_all_tracked_positions", return_value={"ETH/USDT": tracked}), \
-         patch("autotrading.cli.fetch_realized_pnl", return_value=20.0), \
+         patch("autotrading.cli.fetch_realized_pnl", return_value=-20.0), \
          patch("autotrading.cli.record_closed_trade") as mock_record, \
          patch("autotrading.cli.untrack_position"), \
          patch("autotrading.cli.notify_telegram"):
-        _reconcile_stop_loss_closes(
+        _reconcile_external_closes(
             make_fake_secrets(), object(), make_fake_config(), ["ETH/USDT"], {"ETH/USDT": position}
         )
 
-    assert mock_record.call_args.kwargs["exit_price"] == 2990.0
+    assert mock_record.call_args.kwargs["exit_price"] == 3010.0
+    assert mock_record.call_args.kwargs["closed_via"] == "stop_loss"
 
 
 def test_reconcile_leaves_tracked_when_no_realized_pnl_found():
@@ -320,7 +342,7 @@ def test_reconcile_leaves_tracked_when_no_realized_pnl_found():
          patch("autotrading.cli.record_closed_trade") as mock_record, \
          patch("autotrading.cli.untrack_position") as mock_untrack, \
          patch("autotrading.cli.notify_telegram") as mock_notify:
-        _reconcile_stop_loss_closes(
+        _reconcile_external_closes(
             make_fake_secrets(), object(), make_fake_config(), ["BTC/USDT"], {"BTC/USDT": position}
         )
 

@@ -259,12 +259,19 @@ def _notify_review_summary(
         notify_telegram(secrets, "Revisión del bot: sin operaciones nuevas.")
 
 
-def _reconcile_stop_loss_closes(
+def _reconcile_external_closes(
     secrets, futures_client, config: AppConfig, symbols: list[str], positions_by_symbol: dict
 ) -> None:
-    """Detect positions that closed on Binance's side (its own stop-loss
-    order firing) without our code ever calling close_position — without
-    this, those closes would never reach `closed_trades` or notify Telegram.
+    """Detect positions that closed on Binance's side (its own stop-loss OR
+    take-profit order firing, or a manual close outside the bot) without our
+    code ever calling close_position — without this, those closes would
+    never reach `closed_trades` or notify Telegram. There's no order id to
+    tell which resting order actually fired, so the realized PnL sign is
+    used as the practical signal: a gain means the take-profit side of the
+    bracket was the one that would have closed it (or the position was
+    closed favorably some other way), a loss or breakeven is labeled
+    stop_loss — matches what actually matters for /history (won or lost),
+    even for the manual-close-elsewhere case this can't fully distinguish.
     Also self-heals: tracks any symbol that's live-open but not yet in
     `open_position_tracking` (first run after this feature shipped, or
     tracking that fell out of sync for any reason) using its current live
@@ -305,20 +312,23 @@ def _reconcile_stop_loss_closes(
         sign = 1 if tracked_position.position_side == "long" else -1
         exit_price = tracked_position.entry_price + sign * realized_pnl / tracked_position.quantity
 
+        closed_via = "take_profit" if realized_pnl > 0 else "stop_loss"
+
         try:
             record_closed_trade(
                 secrets, symbol=symbol, position_side=tracked_position.position_side,
                 quantity=tracked_position.quantity, entry_price=tracked_position.entry_price,
-                exit_price=exit_price, realized_pnl=realized_pnl, closed_via="stop_loss",
+                exit_price=exit_price, realized_pnl=realized_pnl, closed_via=closed_via,
                 margin=tracked_position.margin,
             )
             untrack_position(secrets, symbol)
         except Exception as exc:
-            print(f"WARNING: failed to record stop-loss close for {symbol}: {exc}")
+            print(f"WARNING: failed to record external close for {symbol}: {exc}")
             continue
 
+        label = "TAKE-PROFIT" if closed_via == "take_profit" else "STOP-LOSS"
         notify_telegram(
-            secrets, f"{symbol}: cerrado por STOP-LOSS (automático), PnL {realized_pnl:+.4f}"
+            secrets, f"{symbol}: cerrado por {label} (automático), PnL {realized_pnl:+.4f}"
         )
 
 
@@ -389,7 +399,7 @@ def run_trade_command(args: argparse.Namespace) -> int:
     executed_results = {}
     failed_symbols: list[tuple[str, str]] = []
     if args.confirm:
-        _reconcile_stop_loss_closes(secrets, futures_client, config, symbols, positions_by_symbol)
+        _reconcile_external_closes(secrets, futures_client, config, symbols, positions_by_symbol)
 
         balance = futures_client.fetch_balance()
         equity = float(balance.get(config.futures.quote_currency, {}).get("total") or 0.0)
