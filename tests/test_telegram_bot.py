@@ -19,6 +19,7 @@ from autotrading.telegram_bot import (
     cmd_positions,
     cmd_set_leverage,
     cmd_set_risk,
+    cmd_set_interval,
     cmd_set_take_profit,
     cmd_settings,
     cmd_pause,
@@ -662,6 +663,44 @@ def test_cmd_set_take_profit_default_clears_override():
         asyncio.run(cmd_set_take_profit(update, context))
 
     mock_set.assert_called_once_with(secrets, None)
+
+
+def test_cmd_set_interval_valid_value():
+    secrets = make_secrets()
+    update = make_update(chat_id=AUTHORIZED_CHAT_ID)
+    context = make_context(args=["30"], secrets=secrets)
+
+    with patch("autotrading.telegram_bot.set_run_interval_minutes") as mock_set:
+        asyncio.run(cmd_set_interval(update, context))
+
+    mock_set.assert_called_once_with(secrets, 30)
+    text = update.message.reply_text.call_args.args[0]
+    assert "30" in text
+
+
+def test_cmd_set_interval_rejects_unsafe_value():
+    secrets = make_secrets()
+    update = make_update(chat_id=AUTHORIZED_CHAT_ID)
+    context = make_context(args=["1"], secrets=secrets)
+
+    with patch("autotrading.telegram_bot.set_run_interval_minutes") as mock_set:
+        asyncio.run(cmd_set_interval(update, context))
+
+    mock_set.assert_not_called()
+    text = update.message.reply_text.call_args.args[0]
+    assert "inválido" in text.lower()
+
+
+def test_cmd_set_interval_ignores_unauthorized_chat():
+    secrets = make_secrets()
+    update = make_update(chat_id=999)
+    context = make_context(args=["30"], secrets=secrets)
+
+    with patch("autotrading.telegram_bot.set_run_interval_minutes") as mock_set:
+        asyncio.run(cmd_set_interval(update, context))
+
+    mock_set.assert_not_called()
+    update.message.reply_text.assert_not_called()
 
 
 def test_notify_does_nothing_when_not_configured():

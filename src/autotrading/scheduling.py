@@ -10,6 +10,25 @@ from autotrading.secrets import Secrets
 BOT_STATE_ROW_ID = 1
 DEFAULT_RUN_INTERVAL_MINUTES = 60
 
+# The systemd timer (deploy/autotrading-heartbeat.timer) ticks every 5
+# minutes — setting an interval below that wouldn't make the bot check any
+# faster, just confuse what the number means. 1440 (24h) is a generous
+# sanity ceiling against an obvious typo, not a real safety concern (unlike
+# leverage/position-size, a "too infrequent" interval just means slower
+# reactions, not a dangerous one).
+MIN_RUN_INTERVAL_MINUTES = 5
+MAX_RUN_INTERVAL_MINUTES = 1440
+
+
+def assert_run_interval_safe(
+    minutes: int, floor: int = MIN_RUN_INTERVAL_MINUTES, ceiling: int = MAX_RUN_INTERVAL_MINUTES
+) -> None:
+    if minutes < floor or minutes > ceiling:
+        raise ValueError(
+            f"run_interval_minutes {minutes} is outside the allowed range "
+            f"[{floor}, {ceiling}]. This range is hardcoded, not configurable."
+        )
+
 
 @dataclass
 class BotState:
@@ -91,6 +110,19 @@ def set_take_profit_margin_pct(secrets: Secrets, value: float | None) -> None:
         cur.execute(
             "UPDATE bot_state SET take_profit_margin_pct = %s WHERE id = %s",
             (value, BOT_STATE_ROW_ID),
+        )
+        conn.commit()
+
+
+def set_run_interval_minutes(secrets: Secrets, minutes: int) -> None:
+    """Unlike leverage/position_size_pct/take_profit_margin_pct, there's no
+    separate YAML value to fall back to here — run_interval_minutes has
+    always lived only in bot_state, so this always sets a real value (no
+    None/"reset to default" case)."""
+    with psycopg2.connect(secrets.supabase_db_url) as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE bot_state SET run_interval_minutes = %s WHERE id = %s",
+            (minutes, BOT_STATE_ROW_ID),
         )
         conn.commit()
 

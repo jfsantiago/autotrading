@@ -1,8 +1,11 @@
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from autotrading.scheduling import (
     BotState,
+    assert_run_interval_safe,
     ensure_bot_state_row,
     fetch_bot_state,
     is_due,
@@ -10,6 +13,7 @@ from autotrading.scheduling import (
     set_bot_enabled,
     set_leverage,
     set_position_size_pct,
+    set_run_interval_minutes,
     set_take_profit_margin_pct,
 )
 from autotrading.secrets import Secrets
@@ -172,3 +176,27 @@ def test_set_bot_enabled_updates_column():
     assert "UPDATE bot_state" in query and "bot_enabled" in query
     assert params == (False, 1)
     conn.commit.assert_called_once()
+
+
+def test_set_run_interval_minutes_updates_column():
+    cursor = MagicMock()
+    conn = make_mock_conn(cursor)
+
+    with patch("autotrading.scheduling.psycopg2.connect", return_value=conn):
+        set_run_interval_minutes(make_secrets(), 30)
+
+    query, params = cursor.execute.call_args.args
+    assert "UPDATE bot_state" in query and "run_interval_minutes" in query
+    assert params == (30, 1)
+    conn.commit.assert_called_once()
+
+
+@pytest.mark.parametrize("minutes", [5, 60, 1440])
+def test_assert_run_interval_safe_accepts_in_range(minutes):
+    assert_run_interval_safe(minutes)  # should not raise
+
+
+@pytest.mark.parametrize("minutes", [0, 4, -5, 1441, 100000])
+def test_assert_run_interval_safe_rejects_out_of_range(minutes):
+    with pytest.raises(ValueError):
+        assert_run_interval_safe(minutes)

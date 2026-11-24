@@ -25,10 +25,12 @@ from autotrading.execution.client import assert_leverage_safe, to_futures_symbol
 from autotrading.execution.orders import close_position
 from autotrading.execution.positions import PositionSide, PositionState, get_position_state
 from autotrading.scheduling import (
+    assert_run_interval_safe,
     fetch_bot_state,
     set_bot_enabled,
     set_leverage,
     set_position_size_pct,
+    set_run_interval_minutes,
     set_take_profit_margin_pct,
 )
 from autotrading.secrets import Secrets
@@ -105,7 +107,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/settings — apalancamiento y tamaño de posición actuales\n"
         "/set_leverage — cambiar el apalancamiento\n"
         "/set_risk — cambiar el tamaño de posición\n"
-        "/set_take_profit — cambiar el take-profit (el stop-loss se ajusta junto)"
+        "/set_take_profit — cambiar el take-profit (el stop-loss se ajusta junto)\n"
+        "/set_interval — cambiar cada cuánto revisa el bot"
     )
 
 
@@ -568,6 +571,35 @@ async def cmd_set_take_profit(update: Update, context: ContextTypes.DEFAULT_TYPE
     )
 
 
+async def cmd_set_interval(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Changes bot_state.run_interval_minutes — how often a heartbeat tick
+    actually runs the full trade check (the heartbeat itself ticks every 5
+    minutes regardless, via systemd; this just gates how many of those
+    ticks do anything). No "default" keyword here — unlike leverage/risk/
+    take-profit, this value has never lived in the YAML, only in bot_state.
+    """
+    secrets: Secrets = context.bot_data["secrets"]
+    if not await _guarded(update, secrets):
+        return
+
+    if not context.args:
+        await update.message.reply_text("Uso: /set_interval <minutos, ej. 30>")
+        return
+
+    try:
+        minutes = int(context.args[0])
+        assert_run_interval_safe(minutes)
+    except ValueError as exc:
+        await update.message.reply_text(f"Valor inválido: {exc}")
+        return
+
+    set_run_interval_minutes(secrets, minutes)
+    await update.message.reply_text(
+        f"Intervalo de revisión actualizado a {minutes} min. Se aplica desde la próxima vez "
+        "que el bot revise (no fuerza una revisión inmediata)."
+    )
+
+
 async def _set_command_menu(application: Application) -> None:
     """Populates Telegram's native "/" command menu — a single button next
     to the message box that expands into the full command list, instead of
@@ -587,6 +619,7 @@ async def _set_command_menu(application: Application) -> None:
             BotCommand("set_leverage", "Cambiar el apalancamiento"),
             BotCommand("set_risk", "Cambiar el tamaño de posición"),
             BotCommand("set_take_profit", "Cambiar el take-profit"),
+            BotCommand("set_interval", "Cambiar cada cuánto revisa el bot"),
             BotCommand("start", "Mostrar el menú de botones"),
         ]
     )
@@ -641,6 +674,7 @@ def run(config: AppConfig, secrets: Secrets, client: Any) -> None:
     application.add_handler(
         CommandHandler("set_take_profit", cmd_set_take_profit, filters=auth_filter)
     )
+    application.add_handler(CommandHandler("set_interval", cmd_set_interval, filters=auth_filter))
     application.add_handler(CallbackQueryHandler(on_close_callback, pattern=r"^close_"))
 
     logger.info("Telegram bot starting (long polling)")
