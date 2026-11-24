@@ -171,6 +171,12 @@ async def cmd_positions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             f"{base_symbol:<8}{_fmt_side(p['side']):<6}{margin_str:>9}"
             f"{pnl_str:>10}{date_str:>12}"
         )
+
+    total_margin = sum(p["margin"] for p in positions if p["margin"] is not None)
+    total_pnl = sum(p["unrealized_pnl"] for p in positions if p["unrealized_pnl"] is not None)
+    total_pnl_str = f"{total_pnl:+.4f}"
+    rows.append("-" * len(header))
+    rows.append(f"{'TOTAL':<8}{'':<6}{_fmt_num(total_margin):>9}{total_pnl_str:>10}{'':>12}")
     table = "\n".join(rows)
     await update.message.reply_text(
         f"Posiciones abiertas:\n<pre>{table}</pre>", parse_mode=ParseMode.HTML
@@ -372,6 +378,14 @@ def _format_trades_table(trades: list) -> str:
             f"{base_symbol:<8}{_fmt_side(t.position_side):<6}"
             f"{margin_str:>9}{pnl_str:>10}{via_str:>5}{date_str:>12}"
         )
+
+    total_margin = sum(t.margin for t in trades if t.margin is not None)
+    total_pnl = sum(t.realized_pnl for t in trades if t.realized_pnl is not None)
+    total_pnl_str = f"{total_pnl:+.4f}"
+    rows.append("-" * len(header))
+    rows.append(
+        f"{'TOTAL':<8}{'':<6}{_fmt_num(total_margin):>9}{total_pnl_str:>10}{'':>5}{'':>12}"
+    )
     return "\n".join(rows)
 
 

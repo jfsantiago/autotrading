@@ -162,6 +162,39 @@ def test_cmd_positions_shows_opened_date_from_tracking():
     assert "260101:1200" in text  # date format "YYMMDD:HHMM" (2-digit year)
 
 
+def test_cmd_positions_shows_totals_row():
+    secrets = make_secrets()
+    config = SimpleNamespace(
+        all_symbols=["BTC/USDT", "ETH/USDT"], futures=SimpleNamespace(quote_currency="USDT")
+    )
+    client = MagicMock()
+    client.fetch_positions = MagicMock(
+        return_value=[
+            {
+                "symbol": "BTC/USDT:USDT", "contracts": 1.5, "side": "long",
+                "entryPrice": 50000.0, "unrealizedPnl": 25.0, "initialMargin": 198.0,
+            },
+            {
+                "symbol": "ETH/USDT:USDT", "contracts": 2.0, "side": "short",
+                "entryPrice": 3000.0, "unrealizedPnl": -5.5, "initialMargin": 198.55,
+            },
+        ]
+    )
+    update = make_update(chat_id=AUTHORIZED_CHAT_ID)
+    context = make_context(secrets=secrets, config=config, client=client)
+
+    with patch(
+        "autotrading.telegram_bot.position_tracking.fetch_all_tracked_positions",
+        return_value={},
+    ):
+        asyncio.run(cmd_positions(update, context))
+
+    text = update.message.reply_text.call_args.args[0]
+    assert "TOTAL" in text
+    assert "396.55" in text  # 198.0 + 198.55 margin
+    assert "+19.5000" in text  # 25.0 + (-5.5) pnl
+
+
 def test_cmd_positions_handles_no_open_positions():
     secrets = make_secrets()
     config = SimpleNamespace(
@@ -293,6 +326,36 @@ def test_cmd_history_marks_take_profit_closes_distinctly():
 
     text = update.message.reply_text.call_args.args[0]
     assert "TP" in text
+
+
+def test_cmd_history_shows_totals_row():
+    secrets = make_secrets()
+    update = make_update(chat_id=AUTHORIZED_CHAT_ID)
+    context = make_context(secrets=secrets)
+
+    trades = [
+        ClosedTrade(
+            symbol="BTC/USDT", position_side="long", quantity=1.0, entry_price=100.0,
+            exit_price=110.0, realized_pnl=10.0, closed_via="bot", margin=100.0,
+            closed_at=datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc),
+        ),
+        ClosedTrade(
+            symbol="ETH/USDT", position_side="short", quantity=1.0, entry_price=3000.0,
+            exit_price=3090.0, realized_pnl=-6.0, closed_via="stop_loss", margin=50.0,
+            closed_at=datetime(2026, 1, 1, 13, 0, tzinfo=timezone.utc),
+        ),
+    ]
+
+    with patch(
+        "autotrading.telegram_bot.trade_history.fetch_recent_closed_trades",
+        return_value=trades,
+    ):
+        asyncio.run(cmd_history(update, context))
+
+    text = update.message.reply_text.call_args.args[0]
+    assert "TOTAL" in text
+    assert "150" in text  # 100.0 + 50.0 margin
+    assert "+4.0000" in text  # 10.0 + (-6.0) pnl
 
 
 def test_cmd_history_handles_no_trades():
