@@ -357,7 +357,7 @@ async def on_close_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
 
 
-def _format_trades_table(trades: list) -> str:
+def _format_trades_table(trades: list, total_margin: float, total_pnl: float) -> str:
     # Monospace table via <pre> — Telegram has no native table widget, but a
     # fixed-width font makes columns line up. Date format "YYMMDD:HHMM"
     # (2-digit year) per explicit request — no internal space (a space was
@@ -366,6 +366,11 @@ def _format_trades_table(trades: list) -> str:
     # committed (pre-leverage), not asset quantity. "Vía" tells a
     # stop-loss-triggered close (fired directly on Binance, bypassing the
     # bot's own close logic) apart from one the bot decided on itself.
+    #
+    # total_margin/total_pnl come from fetch_closed_trades_totals() — a
+    # separate query over ALL history, not just `trades` (whatever page is
+    # being displayed) — otherwise the TOTAL row silently looks better than
+    # reality once older losing trades scroll past the display limit.
     header = f"{'Symbol':<8}{'Lado':<6}{'Cant.':>9}{'PnL':>10}{'Vía':>5}{'Fecha':>12}"
     rows = [header, "-" * len(header)]
     for t in trades:
@@ -379,8 +384,6 @@ def _format_trades_table(trades: list) -> str:
             f"{margin_str:>9}{pnl_str:>10}{via_str:>5}{date_str:>12}"
         )
 
-    total_margin = sum(t.margin for t in trades if t.margin is not None)
-    total_pnl = sum(t.realized_pnl for t in trades if t.realized_pnl is not None)
     total_pnl_str = f"{total_pnl:+.4f}"
     rows.append("-" * len(header))
     rows.append(
@@ -389,20 +392,26 @@ def _format_trades_table(trades: list) -> str:
     return "\n".join(rows)
 
 
+HISTORY_DISPLAY_LIMIT = 30
+
+
 async def cmd_history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     secrets: Secrets = context.bot_data["secrets"]
     if not await _guarded(update, secrets):
         return
 
-    trades = trade_history.fetch_recent_closed_trades(secrets, limit=10)
+    trades = trade_history.fetch_recent_closed_trades(secrets, limit=HISTORY_DISPLAY_LIMIT)
     if not trades:
         await update.message.reply_text("Sin cierres registrados todavía.")
         return
 
-    table = _format_trades_table(trades)
-    await update.message.reply_text(
-        f"Últimos cierres:\n<pre>{table}</pre>", parse_mode=ParseMode.HTML
-    )
+    total_count, total_margin, total_pnl = trade_history.fetch_closed_trades_totals(secrets)
+    table = _format_trades_table(trades, total_margin, total_pnl)
+
+    header = "Últimos cierres:"
+    if total_count > len(trades):
+        header = f"Últimos {len(trades)} cierres (de {total_count} en total):"
+    await update.message.reply_text(f"{header}\n<pre>{table}</pre>", parse_mode=ParseMode.HTML)
 
 
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

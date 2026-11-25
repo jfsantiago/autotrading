@@ -56,3 +56,19 @@ def fetch_recent_closed_trades(secrets: Secrets, limit: int = 10) -> list[Closed
         )
         rows = cur.fetchall()
     return [ClosedTrade(*row) for row in rows]
+
+
+def fetch_closed_trades_totals(secrets: Secrets) -> tuple[int, float, float]:
+    """Aggregates over ALL closed trades ever, not just whatever page
+    /history happens to display — so a long history doesn't silently make
+    the on-screen total look better than reality just because older losing
+    trades scrolled out of the displayed window. SUM() in Postgres already
+    skips NULL margin values on its own, no need to filter them out here.
+    """
+    with psycopg2.connect(secrets.supabase_db_url) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT COUNT(*), COALESCE(SUM(margin), 0), COALESCE(SUM(realized_pnl), 0) "
+            "FROM closed_trades"
+        )
+        count, total_margin, total_pnl = cur.fetchone()
+    return count, total_margin, total_pnl

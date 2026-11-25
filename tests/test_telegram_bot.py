@@ -262,6 +262,9 @@ def test_cmd_history_shows_recent_trades():
     with patch(
         "autotrading.telegram_bot.trade_history.fetch_recent_closed_trades",
         return_value=[trade],
+    ), patch(
+        "autotrading.telegram_bot.trade_history.fetch_closed_trades_totals",
+        return_value=(1, 200.0, 10.0),
     ):
         asyncio.run(cmd_history(update, context))
 
@@ -294,6 +297,9 @@ def test_cmd_history_marks_stop_loss_closes_distinctly():
     with patch(
         "autotrading.telegram_bot.trade_history.fetch_recent_closed_trades",
         return_value=[trade],
+    ), patch(
+        "autotrading.telegram_bot.trade_history.fetch_closed_trades_totals",
+        return_value=(1, 100.0, -3.0),
     ):
         asyncio.run(cmd_history(update, context))
 
@@ -321,6 +327,9 @@ def test_cmd_history_marks_take_profit_closes_distinctly():
     with patch(
         "autotrading.telegram_bot.trade_history.fetch_recent_closed_trades",
         return_value=[trade],
+    ), patch(
+        "autotrading.telegram_bot.trade_history.fetch_closed_trades_totals",
+        return_value=(1, 100.0, 6.0),
     ):
         asyncio.run(cmd_history(update, context))
 
@@ -349,6 +358,9 @@ def test_cmd_history_shows_totals_row():
     with patch(
         "autotrading.telegram_bot.trade_history.fetch_recent_closed_trades",
         return_value=trades,
+    ), patch(
+        "autotrading.telegram_bot.trade_history.fetch_closed_trades_totals",
+        return_value=(2, 150.0, 4.0),
     ):
         asyncio.run(cmd_history(update, context))
 
@@ -356,6 +368,35 @@ def test_cmd_history_shows_totals_row():
     assert "TOTAL" in text
     assert "150" in text  # 100.0 + 50.0 margin
     assert "+4.0000" in text  # 10.0 + (-6.0) pnl
+
+
+def test_cmd_history_totals_reflect_full_history_not_just_displayed_page():
+    # The key behavior this feature is for: an older losing trade that
+    # scrolled past the display limit must still count in TOTAL.
+    secrets = make_secrets()
+    update = make_update(chat_id=AUTHORIZED_CHAT_ID)
+    context = make_context(secrets=secrets)
+
+    displayed_trade = ClosedTrade(
+        symbol="XRP/USDT", position_side="short", quantity=1.0, entry_price=1.0,
+        exit_price=0.9, realized_pnl=16.94, closed_via="bot", margin=193.0,
+        closed_at=datetime(2026, 1, 2, 9, 0, tzinfo=timezone.utc),
+    )
+
+    with patch(
+        "autotrading.telegram_bot.trade_history.fetch_recent_closed_trades",
+        return_value=[displayed_trade],
+    ), patch(
+        # 14 trades total, net PnL +67.77 — includes two big losses not
+        # in the single displayed row above.
+        "autotrading.telegram_bot.trade_history.fetch_closed_trades_totals",
+        return_value=(14, 1741.32, 67.7679),
+    ):
+        asyncio.run(cmd_history(update, context))
+
+    text = update.message.reply_text.call_args.args[0]
+    assert "de 14 en total" in text
+    assert "+67.7679" in text  # full-history total, not just the displayed row's +16.94
 
 
 def test_cmd_history_handles_no_trades():
