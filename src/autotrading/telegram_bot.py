@@ -24,6 +24,7 @@ from autotrading.config import (
 from autotrading.execution.client import assert_leverage_safe, to_futures_symbol
 from autotrading.execution.orders import close_position
 from autotrading.execution.positions import PositionSide, PositionState, get_position_state
+from autotrading.reconciliation import reconcile_external_closes
 from autotrading.scheduling import (
     assert_run_interval_safe,
     fetch_bot_state,
@@ -88,6 +89,22 @@ def _fetch_open_positions_with_pnl(
     return open_positions
 
 
+def _reconcile_now(secrets: Secrets, client: Any, config: AppConfig) -> None:
+    """Runs the same external-close detection the scheduled heartbeat runs
+    hourly, but on demand — so checking /positions or /history doesn't have
+    to wait for the next tick to notice a stop-loss/take-profit that already
+    fired on Binance. Read-mostly: the only writes are recording a close
+    that already happened, never placing a new order.
+    """
+    positions_by_symbol = {
+        symbol: get_position_state(client, symbol, config.futures.quote_currency)
+        for symbol in config.all_symbols
+    }
+    reconcile_external_closes(
+        secrets, client, config, config.all_symbols, positions_by_symbol, notify
+    )
+
+
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     secrets: Secrets = context.bot_data["secrets"]
     if not await _guarded(update, secrets):
@@ -140,6 +157,8 @@ async def cmd_positions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     config: AppConfig = context.bot_data["config"]
     client = context.bot_data["client"]
+
+    _reconcile_now(secrets, client, config)
 
     positions = _fetch_open_positions_with_pnl(
         client, config.all_symbols, config.futures.quote_currency
@@ -399,6 +418,10 @@ async def cmd_history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     secrets: Secrets = context.bot_data["secrets"]
     if not await _guarded(update, secrets):
         return
+
+    config: AppConfig = context.bot_data["config"]
+    client = context.bot_data["client"]
+    _reconcile_now(secrets, client, config)
 
     trades = trade_history.fetch_recent_closed_trades(secrets, limit=HISTORY_DISPLAY_LIMIT)
     if not trades:

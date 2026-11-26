@@ -18,15 +18,14 @@ from autotrading.decision.engine import OrderAction, decide, decide_trade_action
 from autotrading.decision.market import get_latest_signal
 from autotrading.decision.report import print_decisions, save_decisions
 from autotrading.engine.backtester import run_backtest
-from autotrading.execution.client import assert_leverage_safe, make_futures_demo_client, to_futures_symbol
+from autotrading.execution.client import assert_leverage_safe, make_futures_demo_client
 from autotrading.execution.orders import (
     calculate_position_size,
     close_position,
-    fetch_realized_pnl,
     open_long,
     open_short,
 )
-from autotrading.execution.positions import PositionSide, get_position_state
+from autotrading.execution.positions import get_position_state
 from autotrading.execution.report import (
     print_confirm_footer,
     print_no_action,
@@ -36,11 +35,8 @@ from autotrading.execution.report import (
 )
 from autotrading.news.pipeline import build_news_snapshot
 from autotrading.news.report import print_news_summary, save_news_results
-from autotrading.position_tracking import (
-    fetch_all_tracked_positions,
-    track_open_position,
-    untrack_position,
-)
+from autotrading.position_tracking import track_open_position, untrack_position
+from autotrading.reconciliation import reconcile_external_closes
 from autotrading.reporting.report import report
 from autotrading.scheduling import ensure_bot_state_row, fetch_bot_state, is_due, mark_run_completed
 from autotrading.secrets import load_secrets
@@ -259,79 +255,6 @@ def _notify_review_summary(
         notify_telegram(secrets, "Revisión del bot: sin operaciones nuevas.")
 
 
-def _reconcile_external_closes(
-    secrets, futures_client, config: AppConfig, symbols: list[str], positions_by_symbol: dict
-) -> None:
-    """Detect positions that closed on Binance's side (its own stop-loss OR
-    take-profit order firing, or a manual close outside the bot) without our
-    code ever calling close_position — without this, those closes would
-    never reach `closed_trades` or notify Telegram. There's no order id to
-    tell which resting order actually fired, so the realized PnL sign is
-    used as the practical signal: a gain means the take-profit side of the
-    bracket was the one that would have closed it (or the position was
-    closed favorably some other way), a loss or breakeven is labeled
-    stop_loss — matches what actually matters for /history (won or lost),
-    even for the manual-close-elsewhere case this can't fully distinguish.
-    Also self-heals: tracks any symbol that's live-open but not yet in
-    `open_position_tracking` (first run after this feature shipped, or
-    tracking that fell out of sync for any reason) using its current live
-    entry_price/quantity, so future closes of it can be detected too.
-    """
-    tracked = fetch_all_tracked_positions(secrets)
-
-    for symbol in symbols:
-        position = positions_by_symbol[symbol]
-        tracked_position = tracked.get(symbol)
-
-        if position.side != PositionSide.FLAT:
-            if tracked_position is None:
-                track_open_position(
-                    secrets, symbol=symbol, position_side=position.side.value,
-                    quantity=position.size, entry_price=position.entry_price,
-                    margin=position.margin,
-                )
-            continue
-
-        if tracked_position is None:
-            continue  # flat and we already know it — nothing to reconcile
-
-        # We think this symbol is open but Binance shows it flat and we
-        # didn't close it ourselves this cycle — cross-check Binance's own
-        # income history before concluding a stop-loss fired, so a
-        # transient API glitch can't produce a false "closed" record.
-        futures_symbol = to_futures_symbol(symbol, config.futures.quote_currency)
-        since_ms = int(tracked_position.opened_at.timestamp() * 1000)
-        realized_pnl = fetch_realized_pnl(futures_client, futures_symbol, since_ms)
-        if realized_pnl is None:
-            continue  # leave it tracked, retry on the next cycle
-
-        # No order id to query the actual fill price for an externally
-        # triggered close — reconstruct it algebraically from Binance's own
-        # realized PnL figure instead: pnl = (exit - entry) * qty for a
-        # long, (entry - exit) * qty for a short.
-        sign = 1 if tracked_position.position_side == "long" else -1
-        exit_price = tracked_position.entry_price + sign * realized_pnl / tracked_position.quantity
-
-        closed_via = "take_profit" if realized_pnl > 0 else "stop_loss"
-
-        try:
-            record_closed_trade(
-                secrets, symbol=symbol, position_side=tracked_position.position_side,
-                quantity=tracked_position.quantity, entry_price=tracked_position.entry_price,
-                exit_price=exit_price, realized_pnl=realized_pnl, closed_via=closed_via,
-                margin=tracked_position.margin,
-            )
-            untrack_position(secrets, symbol)
-        except Exception as exc:
-            print(f"WARNING: failed to record external close for {symbol}: {exc}")
-            continue
-
-        label = "TAKE-PROFIT" if closed_via == "take_profit" else "STOP-LOSS"
-        notify_telegram(
-            secrets, f"{symbol}: cerrado por {label} (automático), PnL {realized_pnl:+.4f}"
-        )
-
-
 def run_trade_command(args: argparse.Namespace) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
@@ -399,7 +322,9 @@ def run_trade_command(args: argparse.Namespace) -> int:
     executed_results = {}
     failed_symbols: list[tuple[str, str]] = []
     if args.confirm:
-        _reconcile_external_closes(secrets, futures_client, config, symbols, positions_by_symbol)
+        reconcile_external_closes(
+            secrets, futures_client, config, symbols, positions_by_symbol, notify_telegram
+        )
 
         balance = futures_client.fetch_balance()
         equity = float(balance.get(config.futures.quote_currency, {}).get("total") or 0.0)

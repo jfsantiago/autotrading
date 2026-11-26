@@ -115,7 +115,9 @@ def test_cmd_positions_shows_open_positions_with_unrealized_pnl():
     update = make_update(chat_id=AUTHORIZED_CHAT_ID)
     context = make_context(secrets=secrets, config=config, client=client)
 
-    with patch("autotrading.telegram_bot.position_tracking.fetch_all_tracked_positions", return_value={}):
+    with patch("autotrading.telegram_bot._reconcile_now"), patch(
+        "autotrading.telegram_bot.position_tracking.fetch_all_tracked_positions", return_value={}
+    ):
         asyncio.run(cmd_positions(update, context))
 
     update.message.reply_text.assert_called_once()
@@ -152,7 +154,7 @@ def test_cmd_positions_shows_opened_date_from_tracking():
         )
     }
 
-    with patch(
+    with patch("autotrading.telegram_bot._reconcile_now"), patch(
         "autotrading.telegram_bot.position_tracking.fetch_all_tracked_positions",
         return_value=tracked,
     ):
@@ -183,7 +185,7 @@ def test_cmd_positions_shows_totals_row():
     update = make_update(chat_id=AUTHORIZED_CHAT_ID)
     context = make_context(secrets=secrets, config=config, client=client)
 
-    with patch(
+    with patch("autotrading.telegram_bot._reconcile_now"), patch(
         "autotrading.telegram_bot.position_tracking.fetch_all_tracked_positions",
         return_value={},
     ):
@@ -205,7 +207,8 @@ def test_cmd_positions_handles_no_open_positions():
     update = make_update(chat_id=AUTHORIZED_CHAT_ID)
     context = make_context(secrets=secrets, config=config, client=client)
 
-    asyncio.run(cmd_positions(update, context))
+    with patch("autotrading.telegram_bot._reconcile_now"):
+        asyncio.run(cmd_positions(update, context))
 
     text = update.message.reply_text.call_args.args[0]
     assert "Sin posiciones" in text
@@ -245,7 +248,7 @@ def test_cmd_universe_ignores_unauthorized_chat():
 def test_cmd_history_shows_recent_trades():
     secrets = make_secrets()
     update = make_update(chat_id=AUTHORIZED_CHAT_ID)
-    context = make_context(secrets=secrets)
+    context = make_context(secrets=secrets, config=make_config(), client=MagicMock())
 
     trade = ClosedTrade(
         symbol="BTC/USDT",
@@ -259,7 +262,7 @@ def test_cmd_history_shows_recent_trades():
         closed_at=datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc),
     )
 
-    with patch(
+    with patch("autotrading.telegram_bot._reconcile_now"), patch(
         "autotrading.telegram_bot.trade_history.fetch_recent_closed_trades",
         return_value=[trade],
     ), patch(
@@ -280,7 +283,7 @@ def test_cmd_history_shows_recent_trades():
 def test_cmd_history_marks_stop_loss_closes_distinctly():
     secrets = make_secrets()
     update = make_update(chat_id=AUTHORIZED_CHAT_ID)
-    context = make_context(secrets=secrets)
+    context = make_context(secrets=secrets, config=make_config(), client=MagicMock())
 
     trade = ClosedTrade(
         symbol="BTC/USDT",
@@ -294,7 +297,7 @@ def test_cmd_history_marks_stop_loss_closes_distinctly():
         closed_at=datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc),
     )
 
-    with patch(
+    with patch("autotrading.telegram_bot._reconcile_now"), patch(
         "autotrading.telegram_bot.trade_history.fetch_recent_closed_trades",
         return_value=[trade],
     ), patch(
@@ -310,7 +313,7 @@ def test_cmd_history_marks_stop_loss_closes_distinctly():
 def test_cmd_history_marks_take_profit_closes_distinctly():
     secrets = make_secrets()
     update = make_update(chat_id=AUTHORIZED_CHAT_ID)
-    context = make_context(secrets=secrets)
+    context = make_context(secrets=secrets, config=make_config(), client=MagicMock())
 
     trade = ClosedTrade(
         symbol="BTC/USDT",
@@ -324,7 +327,7 @@ def test_cmd_history_marks_take_profit_closes_distinctly():
         closed_at=datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc),
     )
 
-    with patch(
+    with patch("autotrading.telegram_bot._reconcile_now"), patch(
         "autotrading.telegram_bot.trade_history.fetch_recent_closed_trades",
         return_value=[trade],
     ), patch(
@@ -340,7 +343,7 @@ def test_cmd_history_marks_take_profit_closes_distinctly():
 def test_cmd_history_shows_totals_row():
     secrets = make_secrets()
     update = make_update(chat_id=AUTHORIZED_CHAT_ID)
-    context = make_context(secrets=secrets)
+    context = make_context(secrets=secrets, config=make_config(), client=MagicMock())
 
     trades = [
         ClosedTrade(
@@ -355,7 +358,7 @@ def test_cmd_history_shows_totals_row():
         ),
     ]
 
-    with patch(
+    with patch("autotrading.telegram_bot._reconcile_now"), patch(
         "autotrading.telegram_bot.trade_history.fetch_recent_closed_trades",
         return_value=trades,
     ), patch(
@@ -375,7 +378,7 @@ def test_cmd_history_totals_reflect_full_history_not_just_displayed_page():
     # scrolled past the display limit must still count in TOTAL.
     secrets = make_secrets()
     update = make_update(chat_id=AUTHORIZED_CHAT_ID)
-    context = make_context(secrets=secrets)
+    context = make_context(secrets=secrets, config=make_config(), client=MagicMock())
 
     displayed_trade = ClosedTrade(
         symbol="XRP/USDT", position_side="short", quantity=1.0, entry_price=1.0,
@@ -383,7 +386,7 @@ def test_cmd_history_totals_reflect_full_history_not_just_displayed_page():
         closed_at=datetime(2026, 1, 2, 9, 0, tzinfo=timezone.utc),
     )
 
-    with patch(
+    with patch("autotrading.telegram_bot._reconcile_now"), patch(
         "autotrading.telegram_bot.trade_history.fetch_recent_closed_trades",
         return_value=[displayed_trade],
     ), patch(
@@ -402,9 +405,9 @@ def test_cmd_history_totals_reflect_full_history_not_just_displayed_page():
 def test_cmd_history_handles_no_trades():
     secrets = make_secrets()
     update = make_update(chat_id=AUTHORIZED_CHAT_ID)
-    context = make_context(secrets=secrets)
+    context = make_context(secrets=secrets, config=make_config(), client=MagicMock())
 
-    with patch(
+    with patch("autotrading.telegram_bot._reconcile_now"), patch(
         "autotrading.telegram_bot.trade_history.fetch_recent_closed_trades", return_value=[]
     ):
         asyncio.run(cmd_history(update, context))
